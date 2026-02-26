@@ -4,6 +4,24 @@ Query Google NotebookLM notebooks directly from your AI agent for source-grounde
 
 ---
 
+## 🚀 Quick Install
+
+**Paste this into Claude Code, Copilot, or any AI agent chat:**
+
+```
+Install this skill: https://gist.github.com/khengyun/3ad656c8b9eea4f1c141389c962f5297
+```
+
+The agent will automatically:
+- Clone this repository
+- Install to the correct skills directory
+- Verify installation
+- Show next steps
+
+**Supported agents**: Claude Code · GitHub Copilot · OpenAI Codex CLI · Gemini CLI
+
+---
+
 ## Features
 
 - **Source-grounded answers** — Gemini responds only from your NotebookLM documents
