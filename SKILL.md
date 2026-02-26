@@ -1,7 +1,10 @@
 ---
 name: notebooklm-experts
-version: 1.0.0
 description: This skill should be used when the user wants to query Google NotebookLM notebooks directly from Claude Code for source-grounded, citation-backed answers from Gemini. Provides browser automation, isolated venv, library management, and persistent auth. Drastically reduced hallucinations through document-only responses.
+license: MIT
+compatibility: Requires Python 3.9+, Google Chrome, uv package manager
+metadata:
+  version: 1.0.0
 ---
 
 # NotebookLM Experts Skill
