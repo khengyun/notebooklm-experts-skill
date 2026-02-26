@@ -103,7 +103,7 @@ class SmokeTester:
             from auth_manager import AuthManager
             mgr = AuthManager()
 
-            if not mgr.state_file.exists():
+            if not mgr.state_file or not mgr.state_file.exists():
                 return SmokeTestResult(
                     "auth", "Auth state file (state.json)", "fail",
                     "state.json not found — never authenticated",

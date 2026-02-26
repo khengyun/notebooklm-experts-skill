@@ -17,14 +17,22 @@ from datetime import datetime
 class NotebookLibrary:
     """Manages a collection of NotebookLM notebooks with metadata"""
 
-    def __init__(self):
-        """Initialize the notebook library"""
-        # Store data within the skill directory
-        skill_dir = Path(__file__).parent.parent
-        self.data_dir = skill_dir / "data"
+    def __init__(self, profile_id: Optional[str] = None):
+        """Initialize the notebook library.
+
+        Args:
+            profile_id: Profile to load library for. None = active profile.
+        """
+        from profile_manager import ProfileManager
+        pm = ProfileManager()
+        if profile_id:
+            paths = pm.get_paths(profile_id)
+        else:
+            paths = pm.get_active_paths()
+        self.data_dir = paths["profile_dir"]
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        self.library_file = self.data_dir / "library.json"
+        self.library_file = paths["library_file"]
         self.notebooks: Dict[str, Dict[str, Any]] = {}
         self.active_notebook_id: Optional[str] = None
 
@@ -308,6 +316,7 @@ class NotebookLibrary:
 def main():
     """Command-line interface for notebook management"""
     parser = argparse.ArgumentParser(description='Manage NotebookLM library')
+    parser.add_argument('--profile', help='Profile to use (default: active profile)')
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
@@ -341,7 +350,7 @@ def main():
     args = parser.parse_args()
 
     # Initialize library
-    library = NotebookLibrary()
+    library = NotebookLibrary(profile_id=getattr(args, 'profile', None))
 
     # Execute command
     if args.command == 'add':

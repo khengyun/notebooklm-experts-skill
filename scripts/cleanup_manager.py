@@ -12,20 +12,19 @@ from typing import Dict, List, Any
 
 class CleanupManager:
     """
-    Manages cleanup of NotebookLM skill data
-
-    Features:
-    - Preview what will be deleted
-    - Selective cleanup options
-    - Library preservation
-    - Safe deletion with confirmation
+    Manages cleanup of NotebookLM skill data.
+    Profile-aware: can clean a specific profile or all profiles.
     """
 
-    def __init__(self):
-        """Initialize the cleanup manager"""
-        # Skill directory paths
+    def __init__(self, profile_id=None):
+        """Initialize the cleanup manager.
+
+        Args:
+            profile_id: Clean a specific profile. None = clean all data.
+        """
         self.skill_dir = Path(__file__).parent.parent
         self.data_dir = self.skill_dir / "data"
+        self.profile_id = profile_id
 
     def get_cleanup_paths(self, preserve_library: bool = False) -> Dict[str, Any]:
         """
@@ -49,8 +48,23 @@ class CleanupManager:
 
         total_size = 0
 
-        if self.data_dir.exists():
-            # Browser state
+        if self.profile_id:
+            # Clean a specific profile
+            profiles_dir = self.data_dir / "profiles" / self.profile_id
+            if profiles_dir.exists():
+                self._scan_profile_dir(profiles_dir, paths, preserve_library)
+                total_size = sum(
+                    item['size'] for items in paths.values() for item in items
+                )
+        elif self.data_dir.exists():
+            # Clean all profiles
+            profiles_dir = self.data_dir / "profiles"
+            if profiles_dir.exists():
+                for profile_dir in profiles_dir.iterdir():
+                    if profile_dir.is_dir():
+                        self._scan_profile_dir(profile_dir, paths, preserve_library)
+
+            # Also scan legacy flat layout (pre-migration remnants)
             browser_state_dir = self.data_dir / "browser_state"
             if browser_state_dir.exists():
                 for item in browser_state_dir.iterdir():
@@ -112,6 +126,28 @@ class CleanupManager:
             'total_size': total_size,
             'total_items': sum(len(items) for items in paths.values())
         }
+
+    def _scan_profile_dir(self, profile_dir, paths, preserve_library):
+        """Scan a single profile directory for cleanable items."""
+        browser_state_dir = profile_dir / "browser_state"
+        if browser_state_dir.exists():
+            for item in browser_state_dir.iterdir():
+                size = self._get_size(item)
+                paths['browser_state'].append({
+                    'path': str(item), 'size': size,
+                    'type': 'dir' if item.is_dir() else 'file'
+                })
+
+        auth_info = profile_dir / "auth_info.json"
+        if auth_info.exists():
+            size = auth_info.stat().st_size
+            paths['auth'].append({'path': str(auth_info), 'size': size, 'type': 'file'})
+
+        if not preserve_library:
+            library_file = profile_dir / "library.json"
+            if library_file.exists():
+                size = library_file.stat().st_size
+                paths['library'].append({'path': str(library_file), 'size': size, 'type': 'file'})
 
     def _get_size(self, path: Path) -> int:
         """Get size of file or directory in bytes"""
@@ -183,10 +219,10 @@ class CleanupManager:
                     })
                     print(f"  Failed: {path.name} ({e})")
 
-        # Recreate browser_state dir if everything was deleted
-        if not preserve_library and not failed_items:
-            browser_state_dir = self.data_dir / "browser_state"
-            browser_state_dir.mkdir(parents=True, exist_ok=True)
+        # Recreate profile dirs if everything was deleted
+        if not preserve_library and not failed_items and not self.profile_id:
+            profiles_dir = self.data_dir / "profiles"
+            profiles_dir.mkdir(parents=True, exist_ok=True)
 
         return {
             'deleted_items': deleted_items,
@@ -245,6 +281,11 @@ Examples:
     )
 
     parser.add_argument(
+        '--profile',
+        help='Clean only a specific profile (default: clean all data)'
+    )
+
+    parser.add_argument(
         '--confirm',
         action='store_true',
         help='Actually perform the cleanup (without this, only preview)'
@@ -265,7 +306,7 @@ Examples:
     args = parser.parse_args()
 
     # Initialize manager
-    manager = CleanupManager()
+    manager = CleanupManager(profile_id=args.profile)
 
     if args.confirm:
         # Show preview first unless forced

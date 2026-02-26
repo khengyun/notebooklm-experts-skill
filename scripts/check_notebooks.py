@@ -28,10 +28,10 @@ from notebook_manager import NotebookLibrary
 class NotebookValidator:
     """Validates notebook links against NotebookLM"""
 
-    def __init__(self):
+    def __init__(self, profile_id=None):
         """Initialize validator"""
-        self.library = NotebookLibrary()
-        self.auth = AuthManager()
+        self.library = NotebookLibrary(profile_id=profile_id)
+        self.auth = AuthManager(profile_id=profile_id)
         self.results = {}
 
     def validate_all(self):
@@ -54,8 +54,13 @@ class NotebookValidator:
                 return
 
         with sync_playwright() as p:
-            # Launch browser
-            context = BrowserFactory.launch_persistent_context(p, headless=True)
+            # Launch browser with profile-specific paths
+            context = BrowserFactory.launch_persistent_context(
+                p,
+                headless=True,
+                user_data_dir=str(self.auth.browser_profile_dir),
+                state_file=self.auth.state_file,
+            )
             page = context.new_page()
             
             # Check if logged in by visiting home
@@ -178,6 +183,12 @@ class NotebookValidator:
 
 
 if __name__ == "__main__":
+    import argparse
     from datetime import datetime
-    validator = NotebookValidator()
+
+    parser = argparse.ArgumentParser(description='Validate notebook links')
+    parser.add_argument('--profile', help='Profile to use (default: active)')
+    args = parser.parse_args()
+
+    validator = NotebookValidator(profile_id=getattr(args, 'profile', None))
     validator.validate_all()

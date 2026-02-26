@@ -8,6 +8,9 @@ from pathlib import Path
 # Paths
 SKILL_DIR = Path(__file__).parent.parent
 DATA_DIR = SKILL_DIR / "data"
+
+# Legacy flat paths — kept for reference only.
+# All runtime code should use ProfileManager.get_paths() instead.
 BROWSER_STATE_DIR = DATA_DIR / "browser_state"
 BROWSER_PROFILE_DIR = BROWSER_STATE_DIR / "browser_profile"
 STATE_FILE = BROWSER_STATE_DIR / "state.json"

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Authentication Manager for NotebookLM
-Handles Google login and browser state persistence
-Based on the MCP server implementation
+Handles Google login and browser state persistence with multi-profile support.
 
 Implements hybrid auth approach:
 - Persistent browser profile (user_data_dir) for fingerprint consistency
@@ -24,34 +23,49 @@ from patchright.sync_api import sync_playwright, BrowserContext
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import BROWSER_STATE_DIR, STATE_FILE, AUTH_INFO_FILE, DATA_DIR
+from config import DATA_DIR
 from browser_utils import BrowserFactory
+from profile_manager import ProfileManager
 
 
 class AuthManager:
     """
-    Manages authentication and browser state for NotebookLM
-
-    Features:
-    - Interactive Google login
-    - Browser state persistence
-    - Session restoration
-    - Account switching
+    Manages authentication and browser state for NotebookLM.
+    Profile-aware: each profile has its own browser_state and cookies.
     """
 
-    def __init__(self):
-        """Initialize the authentication manager"""
-        # Ensure directories exist
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        BROWSER_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    def __init__(self, profile_id: Optional[str] = None):
+        """Initialize the authentication manager for a given profile.
 
-        self.state_file = STATE_FILE
-        self.auth_info_file = AUTH_INFO_FILE
-        self.browser_state_dir = BROWSER_STATE_DIR
+        Args:
+            profile_id: Explicit profile. None → active profile.
+        """
+        self.pm = ProfileManager()
+
+        if profile_id:
+            self.profile_id = profile_id
+        elif self.pm.active_profile:
+            self.profile_id = self.pm.active_profile
+        else:
+            self.profile_id = None
+
+        if self.profile_id:
+            paths = self.pm.get_paths(self.profile_id)
+            self.state_file = paths["state_file"]
+            self.auth_info_file = paths["auth_info_file"]
+            self.browser_state_dir = paths["browser_state_dir"]
+            self.browser_profile_dir = paths["browser_profile_dir"]
+            # Ensure dirs exist
+            self.browser_state_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.state_file = None
+            self.auth_info_file = None
+            self.browser_state_dir = None
+            self.browser_profile_dir = None
 
     def is_authenticated(self) -> bool:
-        """Check if valid authentication exists"""
-        if not self.state_file.exists():
+        """Check if valid authentication exists for the current profile"""
+        if not self.state_file or not self.state_file.exists():
             return False
 
         # Check if state file is not too old (7 days)
@@ -62,14 +76,15 @@ class AuthManager:
         return True
 
     def get_auth_info(self) -> Dict[str, Any]:
-        """Get authentication information"""
+        """Get authentication information for the current profile"""
         info = {
+            'profile_id': self.profile_id,
             'authenticated': self.is_authenticated(),
-            'state_file': str(self.state_file),
-            'state_exists': self.state_file.exists()
+            'state_file': str(self.state_file) if self.state_file else None,
+            'state_exists': self.state_file.exists() if self.state_file else False,
         }
 
-        if self.auth_info_file.exists():
+        if self.auth_info_file and self.auth_info_file.exists():
             try:
                 with open(self.auth_info_file, 'r') as f:
                     saved_info = json.load(f)
@@ -94,7 +109,11 @@ class AuthManager:
         Returns:
             True if authentication successful
         """
-        print("Starting authentication setup...")
+        if not self.profile_id:
+            print("Error: No profile set. Create one first with: auth_manager.py setup --name <name>")
+            return False
+
+        print(f"Starting authentication setup for profile '{self.profile_id}'...")
         print(f"  Timeout: {timeout_minutes} minutes")
 
         playwright = None
@@ -103,10 +122,12 @@ class AuthManager:
         try:
             playwright = sync_playwright().start()
 
-            # Launch using factory
+            # Launch using factory with profile-specific paths
             context = BrowserFactory.launch_persistent_context(
                 playwright,
-                headless=headless
+                headless=headless,
+                user_data_dir=str(self.browser_profile_dir),
+                state_file=self.state_file,
             )
 
             # Navigate to NotebookLM
@@ -168,14 +189,17 @@ class AuthManager:
             raise
 
     def _save_auth_info(self):
-        """Save authentication metadata"""
+        """Save authentication metadata and update profile registry"""
         try:
+            now = time.time()
             info = {
-                'authenticated_at': time.time(),
+                'authenticated_at': now,
                 'authenticated_at_iso': time.strftime('%Y-%m-%d %H:%M:%S')
             }
             with open(self.auth_info_file, 'w') as f:
                 json.dump(info, f, indent=2)
+            # Update profile registry
+            self.pm.update_profile(self.profile_id, authenticated_at=now)
         except Exception:
             pass  # Non-critical
 
@@ -186,21 +210,25 @@ class AuthManager:
         Returns:
             True if cleared successfully
         """
-        print("Clearing authentication data...")
+        if not self.profile_id:
+            print("Error: No profile set.")
+            return False
+
+        print(f"Clearing authentication data for profile '{self.profile_id}'...")
 
         try:
             # Remove browser state
-            if self.state_file.exists():
+            if self.state_file and self.state_file.exists():
                 self.state_file.unlink()
                 print("  Removed browser state")
 
             # Remove auth info
-            if self.auth_info_file.exists():
+            if self.auth_info_file and self.auth_info_file.exists():
                 self.auth_info_file.unlink()
                 print("  Removed auth info")
 
             # Clear entire browser state directory
-            if self.browser_state_dir.exists():
+            if self.browser_state_dir and self.browser_state_dir.exists():
                 shutil.rmtree(self.browser_state_dir)
                 self.browser_state_dir.mkdir(parents=True, exist_ok=True)
                 print("  Cleared browser data")
@@ -232,8 +260,8 @@ class AuthManager:
 
     def validate_auth(self) -> bool:
         """
-        Validate that stored authentication works
-        Uses persistent context to match actual usage pattern
+        Validate that stored authentication works.
+        Uses persistent context to match actual usage pattern.
 
         Returns:
             True if authentication is valid
@@ -241,7 +269,7 @@ class AuthManager:
         if not self.is_authenticated():
             return False
 
-        print("Validating authentication...")
+        print(f"Validating authentication for profile '{self.profile_id}'...")
 
         playwright = None
         context = None
@@ -249,10 +277,12 @@ class AuthManager:
         try:
             playwright = sync_playwright().start()
 
-            # Launch using factory
+            # Launch using factory with profile-specific paths
             context = BrowserFactory.launch_persistent_context(
                 playwright,
-                headless=True
+                headless=True,
+                user_data_dir=str(self.browser_profile_dir),
+                state_file=self.state_file,
             )
 
             # Try to access NotebookLM
@@ -262,6 +292,7 @@ class AuthManager:
             # Check if we can access NotebookLM
             if "notebooklm.google.com" in page.url and "accounts.google.com" not in page.url:
                 print("  Authentication is valid")
+                self.pm.update_profile(self.profile_id, last_validated=time.time())
                 return True
             else:
                 print("  Authentication is invalid (redirected to login)")
@@ -291,30 +322,64 @@ def main():
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
     # Setup command
-    setup_parser = subparsers.add_parser('setup', help='Setup authentication')
+    setup_parser = subparsers.add_parser('setup', help='Setup authentication (creates profile if --name given)')
+    setup_parser.add_argument('--name', help='Create a new profile with this name before authenticating')
+    setup_parser.add_argument('--profile', help='Authenticate an existing profile')
     setup_parser.add_argument('--headless', action='store_true', help='Run in headless mode')
     setup_parser.add_argument('--timeout', type=float, default=10, help='Login timeout in minutes (default: 10)')
 
     # Status command
-    subparsers.add_parser('status', help='Check authentication status')
+    status_parser = subparsers.add_parser('status', help='Check authentication status')
+    status_parser.add_argument('--profile', help='Check a specific profile (default: active)')
 
     # Validate command
-    subparsers.add_parser('validate', help='Validate authentication')
+    validate_parser = subparsers.add_parser('validate', help='Validate authentication works')
+    validate_parser.add_argument('--profile', help='Validate a specific profile (default: active)')
 
     # Clear command
-    subparsers.add_parser('clear', help='Clear authentication')
+    clear_parser = subparsers.add_parser('clear', help='Clear authentication for a profile')
+    clear_parser.add_argument('--profile', help='Clear a specific profile (default: active)')
 
     # Re-auth command
     reauth_parser = subparsers.add_parser('reauth', help='Re-authenticate (clear + setup)')
+    reauth_parser.add_argument('--profile', help='Re-authenticate a specific profile (default: active)')
     reauth_parser.add_argument('--timeout', type=float, default=10, help='Login timeout in minutes (default: 10)')
+
+    # List profiles command
+    subparsers.add_parser('list', help='List all profiles with status')
+
+    # Set active profile command
+    set_active_parser = subparsers.add_parser('set-active', help='Switch active profile')
+    set_active_parser.add_argument('--id', required=True, help='Profile ID to activate')
+
+    # Delete profile command
+    delete_parser = subparsers.add_parser('delete', help='Delete a profile')
+    delete_parser.add_argument('--id', required=True, help='Profile ID to delete')
 
     args = parser.parse_args()
 
-    # Initialize manager
-    auth = AuthManager()
+    if args.command == 'list':
+        pm = ProfileManager()
+        pm.print_profiles()
+        return
 
-    # Execute command
+    if args.command == 'set-active':
+        pm = ProfileManager()
+        pm.set_active(args.id)
+        return
+
+    if args.command == 'delete':
+        pm = ProfileManager()
+        pm.delete_profile(args.id)
+        return
+
     if args.command == 'setup':
+        profile_id = getattr(args, 'profile', None)
+        if args.name:
+            pm = ProfileManager()
+            entry = pm.create_profile(args.name)
+            profile_id = entry["id"]
+        auth = AuthManager(profile_id=profile_id)
         if auth.setup_auth(headless=args.headless, timeout_minutes=args.timeout):
             print("\nAuthentication setup complete!")
             print("You can now use ask_question.py to query NotebookLM")
@@ -323,8 +388,9 @@ def main():
             exit(1)
 
     elif args.command == 'status':
+        auth = AuthManager(profile_id=getattr(args, 'profile', None))
         info = auth.get_auth_info()
-        print("\nAuthentication Status:")
+        print(f"\nAuthentication Status (profile: {info.get('profile_id', 'N/A')}):")
         print(f"  Authenticated: {'Yes' if info['authenticated'] else 'No'}")
         if info.get('state_age_hours'):
             print(f"  State age: {info['state_age_hours']:.1f} hours")
@@ -333,17 +399,20 @@ def main():
         print(f"  State file: {info['state_file']}")
 
     elif args.command == 'validate':
+        auth = AuthManager(profile_id=getattr(args, 'profile', None))
         if auth.validate_auth():
             print("Authentication is valid and working")
         else:
             print("Authentication is invalid or expired")
-            print("Run: auth_manager.py setup")
+            print("Run: auth_manager.py reauth")
 
     elif args.command == 'clear':
+        auth = AuthManager(profile_id=getattr(args, 'profile', None))
         if auth.clear_auth():
             print("Authentication cleared")
 
     elif args.command == 'reauth':
+        auth = AuthManager(profile_id=getattr(args, 'profile', None))
         if auth.re_auth(timeout_minutes=args.timeout):
             print("\nRe-authentication complete!")
         else:

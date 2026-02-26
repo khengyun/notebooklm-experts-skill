@@ -37,7 +37,7 @@ FOLLOW_UP_REMINDER = (
 )
 
 
-def ask_notebooklm(question: str, notebook_url: str, headless: bool = True) -> str:
+def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, profile_id: str = None) -> str:
     """
     Ask a question to NotebookLM
 
@@ -45,18 +45,21 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True) -> s
         question: Question to ask
         notebook_url: NotebookLM notebook URL
         headless: Run browser in headless mode
+        profile_id: Profile to use (None = active)
 
     Returns:
         Answer text from NotebookLM
     """
-    auth = AuthManager()
+    auth = AuthManager(profile_id=profile_id)
 
     if not auth.is_authenticated():
-        print("Warning: Not authenticated. Run: python auth_manager.py setup")
+        print("Warning: Not authenticated. Run: auth_manager.py setup")
         return None
 
     print(f"Asking: {question}")
     print(f"Notebook: {notebook_url}")
+    if auth.profile_id:
+        print(f"Profile: {auth.profile_id}")
 
     playwright = None
     context = None
@@ -65,10 +68,12 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True) -> s
         # Start playwright
         playwright = sync_playwright().start()
 
-        # Launch persistent browser context using factory
+        # Launch persistent browser context using factory with profile paths
         context = BrowserFactory.launch_persistent_context(
             playwright,
-            headless=headless
+            headless=headless,
+            user_data_dir=str(auth.browser_profile_dir),
+            state_file=auth.state_file,
         )
 
         # Navigate to notebook
@@ -193,6 +198,7 @@ def main():
     parser.add_argument('--question', required=True, help='Question to ask')
     parser.add_argument('--notebook-url', help='NotebookLM notebook URL')
     parser.add_argument('--notebook-id', help='Notebook ID from library')
+    parser.add_argument('--profile', help='Profile to use (default: active profile)')
     parser.add_argument('--show-browser', action='store_true', help='Show browser')
 
     args = parser.parse_args()
@@ -200,8 +206,10 @@ def main():
     # Resolve notebook URL
     notebook_url = args.notebook_url
 
+    profile_id = getattr(args, 'profile', None)
+
     if not notebook_url and args.notebook_id:
-        library = NotebookLibrary()
+        library = NotebookLibrary(profile_id=profile_id)
         notebook = library.get_notebook(args.notebook_id)
         if notebook:
             notebook_url = notebook['url']
@@ -211,7 +219,7 @@ def main():
 
     if not notebook_url:
         # Check for active notebook first
-        library = NotebookLibrary()
+        library = NotebookLibrary(profile_id=profile_id)
         active = library.get_active_notebook()
         if active:
             notebook_url = active['url']
@@ -235,7 +243,8 @@ def main():
     answer = ask_notebooklm(
         question=args.question,
         notebook_url=notebook_url,
-        headless=not args.show_browser
+        headless=not args.show_browser,
+        profile_id=profile_id,
     )
 
     if answer:

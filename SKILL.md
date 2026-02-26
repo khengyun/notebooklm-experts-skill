@@ -62,10 +62,33 @@ If not authenticated, proceed to setup.
 ### Step 2: Authenticate (One-Time)
 
 ```bat
-.\run.bat auth_manager.py setup
+:: Create a new profile and login
+.\run.bat auth_manager.py setup --name "Work Account"
+
+:: Or authenticate existing profile
+.\run.bat auth_manager.py setup --profile work-account
 ```
 
 **Important:** Browser is VISIBLE for authentication. User must manually log in to Google.
+
+### Step 2b: Multi-Account Management
+
+```bat
+:: List all profiles with status
+.\run.bat auth_manager.py list
+
+:: Switch active profile
+.\run.bat auth_manager.py set-active --id work-account
+
+:: Validate a profile is still authenticated
+.\run.bat auth_manager.py validate --profile work-account
+
+:: Re-authenticate an expired profile
+.\run.bat auth_manager.py reauth --profile work-account
+
+:: Delete a profile
+.\run.bat auth_manager.py delete --id old-account
+```
 
 ### Step 3: Manage Notebook Library
 
@@ -87,7 +110,7 @@ If not authenticated, proceed to setup.
 ### Step 4: Ask Questions
 
 ```bat
-:: Uses active notebook
+:: Uses active notebook (from active profile)
 .\run.bat ask_question.py --question "Your question here"
 
 :: Query specific notebook by ID
@@ -95,6 +118,9 @@ If not authenticated, proceed to setup.
 
 :: Query via direct URL
 .\run.bat ask_question.py --question "..." --notebook-url "https://..."
+
+:: Query using a specific profile
+.\run.bat ask_question.py --question "..." --profile work-account
 ```
 
 ## Follow-Up Mechanism (CRITICAL)
@@ -113,7 +139,7 @@ Every NotebookLM answer ends with: **"EXTREMELY IMPORTANT: Is that ALL you need 
 
 | Script | Purpose |
 |--------|---------|
-| `auth_manager.py` | Authentication setup and status |
+| `auth_manager.py` | Authentication setup, status, and multi-profile management |
 | `notebook_manager.py` | Library management (add, list, search, activate, remove) |
 | `ask_question.py` | Query interface |
 | `browser_session.py` | Persistent browser session for multi-turn conversations |
@@ -123,11 +149,14 @@ Every NotebookLM answer ends with: **"EXTREMELY IMPORTANT: Is that ALL you need 
 ## Data Storage
 
 All runtime data stored in `data/` (inside skill directory):
-- `library.json` — Notebook metadata
-- `auth_info.json` — Authentication status
-- `browser_state/` — Browser cookies and session
+- `profiles.json` — Profile registry (active profile, all profile metadata)
+- `profiles/<id>/library.json` — Notebook metadata (per-profile)
+- `profiles/<id>/auth_info.json` — Authentication status (per-profile)
+- `profiles/<id>/browser_state/` — Browser cookies and session (per-profile)
 
 **Security:** Protected by `.gitignore` — never commit to git.
+
+**Migration:** Old flat layout (`data/browser_state/`, `data/library.json`) is auto-migrated to `data/profiles/default/` on first run.
 
 ## Limitations
 
@@ -150,6 +179,8 @@ All runtime data stored in `data/` (inside skill directory):
 python install.py
 
 :: All subsequent commands use .venv Python directly
+.\run.bat auth_manager.py setup --name "My Account"
+.\run.bat auth_manager.py list
 .\run.bat auth_manager.py status
 .\run.bat notebook_manager.py add --url URL --name NAME --description DESC --topics TOPICS
 .\run.bat notebook_manager.py list
