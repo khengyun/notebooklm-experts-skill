@@ -113,6 +113,13 @@ class NotebookValidator:
                     is_active = True
                     reason = "Accessible"
                     break
+
+            # Extract real title from page when accessible
+            detected_title = None
+            if is_active:
+                raw_title = page.title()
+                if raw_title and " - NotebookLM" in raw_title:
+                    detected_title = raw_title.rsplit(" - NotebookLM", 1)[0].strip()
             
             if not is_active:
                 # Case 2: Redirected to home (common when notebook doesn't exist or no access)
@@ -141,7 +148,8 @@ class NotebookValidator:
             self.results[notebook_id] = {
                 'status': status, 
                 'reason': reason,
-                'checked_at': datetime.now().isoformat()
+                'checked_at': datetime.now().isoformat(),
+                'detected_title': detected_title,
             }
             
         except Exception as e:
@@ -170,13 +178,20 @@ class NotebookValidator:
                 print(f"[{status.upper()}] {name}: {result['reason']}")
 
     def _update_library(self):
-        """Update library with validation status"""
+        """Update library with validation status and detected titles"""
         print("\nUpdating library metadata...")
         for notebook_id, result in self.results.items():
             if notebook_id in self.library.notebooks:
                 self.library.notebooks[notebook_id]['last_check_status'] = result['status']
                 self.library.notebooks[notebook_id]['last_check_reason'] = result['reason']
                 self.library.notebooks[notebook_id]['last_checked'] = datetime.now().isoformat()
+
+                # Sync detected title if available and different
+                detected = result.get('detected_title')
+                if detected and detected != self.library.notebooks[notebook_id].get('name'):
+                    old_name = self.library.notebooks[notebook_id]['name']
+                    self.library.notebooks[notebook_id]['name'] = detected
+                    print(f"  Updated title: '{old_name}' → '{detected}'")
         
         self.library._save_library()
         print("Library updated.")

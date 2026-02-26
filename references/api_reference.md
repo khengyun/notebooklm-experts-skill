@@ -45,21 +45,23 @@ Query NotebookLM with automated browser interaction.
 Manage notebook library with CRUD operations.
 
 ```bash
-# Smart Add (discover content first)
-.\\run.bat ask_question.py --question "What is the content of this notebook? What topics are covered? Provide a complete overview briefly and concisely" --notebook-url "[URL]"
-# Then add with discovered info
+# Smart Add — auto-detect name, topics from notebook page (RECOMMENDED)
+.\\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/..."
+
+# Add with manual overrides
+.\\run.bat notebook_manager.py add \
+  --url "https://notebooklm.google.com/notebook/..." \
+  --name "Custom Name" \
+  --description "Custom description" \
+  --topics "topic1,topic2"
+
+# Skip auto-fetch (offline add)
 .\\run.bat notebook_manager.py add \
   --url "https://notebooklm.google.com/notebook/..." \
   --name "Name" \
   --description "Description" \
-  --topics "topic1,topic2"
-
-# Direct add (when you know the content)
-.\\run.bat notebook_manager.py add \
-  --url "https://notebooklm.google.com/notebook/..." \
-  --name "Name" \
-  --description "What it contains" \
-  --topics "topic1,topic2"
+  --topics "topic1,topic2" \
+  --no-fetch
 
 # List notebooks
 .\\run.bat notebook_manager.py list
@@ -78,7 +80,7 @@ Manage notebook library with CRUD operations.
 ```
 
 **Commands:**
-- `add`: Add notebook (requires --url, --name, --topics)
+- `add`: Add notebook (requires --url; --name, --description, --topics auto-detected if omitted)
 - `list`: Show all notebooks
 - `search`: Find notebooks by keyword
 - `activate`: Set default notebook

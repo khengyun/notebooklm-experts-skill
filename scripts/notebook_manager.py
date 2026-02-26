@@ -9,9 +9,124 @@ import json
 import argparse
 import uuid
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+
+
+def _extract_id_from_url(url: str) -> Optional[str]:
+    """Extract notebook UUID from NotebookLM URL"""
+    match = re.search(r'/notebook/([a-f0-9-]+)', url)
+    if match:
+        return match.group(1)
+    return None
+
+
+def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) -> Dict[str, Any]:
+    """
+    Navigate to a NotebookLM notebook and extract real metadata.
+
+    Returns:
+        Dict with 'title' (str or None) and 'sources' (list of source name strings)
+    """
+    from patchright.sync_api import sync_playwright
+    from browser_utils import BrowserFactory
+    from auth_manager import AuthManager
+    from config import QUERY_INPUT_SELECTORS
+
+    auth = AuthManager(profile_id=profile_id)
+
+    if not auth.is_authenticated():
+        print("Warning: Not authenticated. Cannot fetch metadata.")
+        return {'title': None, 'sources': []}
+
+    playwright = None
+    context = None
+
+    try:
+        playwright = sync_playwright().start()
+        context = BrowserFactory.launch_persistent_context(
+            playwright,
+            headless=headless,
+            user_data_dir=str(auth.browser_profile_dir),
+            state_file=auth.state_file,
+        )
+        page = context.new_page()
+
+        print("  Fetching notebook metadata...")
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_timeout(5000)
+
+        # Check accessibility
+        is_ready = False
+        for sel in QUERY_INPUT_SELECTORS:
+            try:
+                if page.is_visible(sel):
+                    is_ready = True
+                    break
+            except Exception:
+                continue
+
+        if not is_ready:
+            print("  Warning: Notebook may not be accessible")
+
+        # Extract title from page title
+        raw_title = page.title()
+        title = None
+        if raw_title:
+            if " - NotebookLM" in raw_title:
+                title = raw_title.rsplit(" - NotebookLM", 1)[0].strip()
+            elif raw_title not in ("NotebookLM", ""):
+                title = raw_title.strip()
+
+        # Extract source names from the sources panel
+        sources = []
+        source_selectors = [
+            '.source-item .source-title',
+            '.source-item-title',
+            '.source-list-item .title',
+            'source-item .title-text',
+            '[data-source-title]',
+            '.notebook-source .title',
+        ]
+
+        for sel in source_selectors:
+            try:
+                elements = page.query_selector_all(sel)
+                if elements:
+                    for el in elements:
+                        text = el.inner_text().strip()
+                        if text and text not in sources:
+                            sources.append(text)
+                    if sources:
+                        break
+            except Exception:
+                continue
+
+        print(f"  Title: {title or '(not found)'}")
+        if sources:
+            print(f"  Sources ({len(sources)}): {', '.join(sources[:5])}")
+        else:
+            print("  Sources: (none extracted)")
+
+        return {'title': title, 'sources': sources}
+
+    except Exception as e:
+        print(f"  Error fetching metadata: {e}")
+        return {'title': None, 'sources': []}
+
+    finally:
+        if context:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if playwright:
+            try:
+                playwright.stop()
+            except Exception:
+                pass
 
 
 class NotebookLibrary:
@@ -93,8 +208,8 @@ class NotebookLibrary:
         Returns:
             The created notebook object
         """
-        # Generate ID from name
-        notebook_id = name.lower().replace(' ', '-').replace('_', '-')
+        # Use UUID from URL as ID, fallback to slugified name
+        notebook_id = _extract_id_from_url(url) or name.lower().replace(' ', '-').replace('_', '-')
 
         # Check for duplicates
         if notebook_id in self.notebooks:
@@ -323,11 +438,12 @@ def main():
     # Add command
     add_parser = subparsers.add_parser('add', help='Add a notebook')
     add_parser.add_argument('--url', required=True, help='NotebookLM URL')
-    add_parser.add_argument('--name', required=True, help='Display name')
-    add_parser.add_argument('--description', required=True, help='Description')
-    add_parser.add_argument('--topics', required=True, help='Comma-separated topics')
+    add_parser.add_argument('--name', help='Display name (auto-detected if omitted)')
+    add_parser.add_argument('--description', help='Description (auto-generated if omitted)')
+    add_parser.add_argument('--topics', help='Comma-separated topics (auto-detected from sources if omitted)')
     add_parser.add_argument('--use-cases', help='Comma-separated use cases')
     add_parser.add_argument('--tags', help='Comma-separated tags')
+    add_parser.add_argument('--no-fetch', action='store_true', help='Skip auto-fetching metadata from browser')
 
     # List command
     subparsers.add_parser('list', help='List all notebooks')
@@ -354,14 +470,51 @@ def main():
 
     # Execute command
     if args.command == 'add':
-        topics = [t.strip() for t in args.topics.split(',')]
+        name = args.name
+        description = args.description
+        topics_str = args.topics
+
+        # Auto-fetch metadata from notebook page when fields are missing
+        if not args.no_fetch and (not name or not description or not topics_str):
+            print("Auto-detecting metadata from notebook page...")
+            meta = fetch_notebook_metadata(
+                args.url,
+                profile_id=getattr(args, 'profile', None),
+            )
+
+            if not name and meta.get('title'):
+                name = meta['title']
+                print(f"  Using detected name: {name}")
+
+            if not topics_str and meta.get('sources'):
+                topics_str = ','.join(meta['sources'])
+                print(f"  Using detected topics from sources: {topics_str}")
+
+            if not description:
+                if meta.get('sources'):
+                    description = f"Notebook with {len(meta['sources'])} sources: {', '.join(meta['sources'][:5])}"
+                elif name:
+                    description = name
+                print(f"  Using generated description: {description}")
+
+        # Final fallback: extract ID from URL as name if still missing
+        if not name:
+            name = _extract_id_from_url(args.url) or 'unnamed-notebook'
+            print(f"  Warning: Could not detect name, using: {name}")
+        if not description:
+            description = name
+        if not topics_str:
+            topics_str = 'general'
+            print("  Warning: No topics detected, using: general")
+
+        topics = [t.strip() for t in topics_str.split(',')]
         use_cases = [u.strip() for u in args.use_cases.split(',')] if args.use_cases else None
         tags = [t.strip() for t in args.tags.split(',')] if args.tags else None
 
         notebook = library.add_notebook(
             url=args.url,
-            name=args.name,
-            description=args.description,
+            name=name,
+            description=description,
             topics=topics,
             use_cases=use_cases,
             tags=tags
