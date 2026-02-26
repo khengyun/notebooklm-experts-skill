@@ -24,9 +24,17 @@ The agent will automatically:
 
 ## Features
 
-- **Source-grounded answers** — Gemini responds only from your NotebookLM documents
-- **Isolated virtual environment** — dependencies are contained under `.venv/`, never touching your global Python
-- **Persistent auth** — authenticate once; sessions are saved across runs
-- **Notebook library** — manage multiple notebooks; switch active notebook anytime
-- **Anti-detection browser** — powered by `patchright` (real Chrome, not Chromium)
-- **Cross-platform** — `run.bat` (Windows) and `run.sh` (Linux/macOS) wrappers
+- **Source-grounded answers** — Gemini responds only from your NotebookLM documents, drastically reducing hallucinations.
+- **Persistent auth** — authenticate once; sessions are saved across runs so you never log in again.
+- **Notebook library** — add, remove, search, and switch active notebooks from the CLI.
+- **Export notebooks** — dump your full library to JSON or CSV with a single command.
+- **Import notebooks** — restore or merge a JSON/CSV export back into your library with conflict resolution (`merge` / `overwrite`).
+- **Add web source** — automatically add any web URL or YouTube URL as a notebook source via browser automation.
+- **Anti-detection browser** — powered by `patchright` (real Chrome, not Chromium) to avoid bot detection.
+- **Isolated virtual environment** — all dependencies live under `.venv/`, never touching your global Python.
+- **Cross-platform** — `run.bat` (Windows) and `run.sh` (Linux/macOS) wrappers included.
+
+
+---
+
+**Then reload your agent** (Cmd+R or restart VS Code)

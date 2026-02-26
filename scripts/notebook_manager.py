@@ -5,14 +5,17 @@ Manages a library of NotebookLM notebooks with metadata
 Based on the MCP server implementation
 """
 
+import csv
+import io
 import json
+import sys
 import argparse
 import uuid
 import os
 import re
 from urllib.parse import unquote
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 
@@ -461,6 +464,200 @@ class NotebookLibrary:
             'library_path': str(self.library_file)
         }
 
+    # ------------------------------------------------------------------ #
+    # M1 — Export                                                          #
+    # ------------------------------------------------------------------ #
+
+    def export_notebooks(
+        self,
+        format: str = 'json',
+        output_path: Optional[str] = None,
+    ) -> Path:
+        """Export all notebooks to a file.
+
+        Args:
+            format: Output format — 'json' or 'csv'
+            output_path: Destination file path. If None, writes to
+                         data/profiles/{profile}/exports/notebooks_export_DATE.{ext}
+
+        Returns:
+            Path to the written file
+        """
+        notebooks = list(self.notebooks.values())
+        metadata = {
+            'active_notebook_id': self.active_notebook_id,
+            'total_notebooks': len(notebooks),
+            'total_use_count': sum(n.get('use_count', 0) for n in notebooks),
+        }
+
+        if format == 'json':
+            content = self._export_json(notebooks, metadata)
+            ext = 'json'
+        elif format == 'csv':
+            content = self._export_csv(notebooks)
+            ext = 'csv'
+        else:
+            raise ValueError(f"Unsupported format: {format!r}. Use 'json' or 'csv'")
+
+        if output_path:
+            dest = Path(output_path)
+        else:
+            exports_dir = self.data_dir / 'exports'
+            exports_dir.mkdir(parents=True, exist_ok=True)
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            dest = exports_dir / f'notebooks_export_{date_str}.{ext}'
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, 'w', encoding='utf-8', newline='') as f:
+            f.write(content)
+
+        print(f"Exported {len(notebooks)} notebooks to {dest}")
+        return dest
+
+    def _export_json(self, notebooks: List[Dict], metadata: Dict) -> str:
+        """Format notebooks as a JSON export payload"""
+        payload = {
+            'export_version': '1.0',
+            'exported_at': datetime.now().isoformat(),
+            'exported_by': 'notebooklm-experts/1.0',
+            'notebooks': notebooks,
+            'metadata': metadata,
+        }
+        return json.dumps(payload, indent=2, ensure_ascii=False)
+
+    def _export_csv(self, notebooks: List[Dict]) -> str:
+        """Format notebooks as CSV with semicolon-delimited list fields"""
+        output = io.StringIO()
+        fieldnames = [
+            'id', 'url', 'name', 'description', 'topics', 'tags',
+            'content_types', 'use_cases', 'created_at', 'updated_at',
+            'use_count', 'last_used',
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+        writer.writeheader()
+        for nb in notebooks:
+            row = dict(nb)
+            for field in ('topics', 'tags', 'content_types', 'use_cases'):
+                row[field] = ';'.join(nb.get(field) or [])
+            writer.writerow(row)
+        return output.getvalue()
+
+    # ------------------------------------------------------------------ #
+    # M2 — Import                                                          #
+    # ------------------------------------------------------------------ #
+
+    def import_notebooks(
+        self,
+        file_path: str,
+        strategy: str = 'merge',
+    ) -> Dict[str, Any]:
+        """Import notebooks from a JSON or CSV file.
+
+        Args:
+            file_path: Path to the import file (.json or .csv)
+            strategy: 'merge' = skip existing IDs; 'overwrite' = replace existing
+
+        Returns:
+            Dict with keys: imported, skipped, errors, notebooks
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Import file not found: {path}")
+
+        fmt = self._detect_format(path)
+
+        if fmt == 'json':
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and 'notebooks' in data:
+                raw = data['notebooks']
+            elif isinstance(data, list):
+                raw = data
+            else:
+                raise ValueError("JSON must contain an object with 'notebooks' key or a root list")
+        elif fmt == 'csv':
+            raw = []
+            with open(path, 'r', encoding='utf-8', newline='') as f:
+                for row in csv.DictReader(f):
+                    for field in ('topics', 'tags', 'content_types', 'use_cases'):
+                        if field in row:
+                            row[field] = [v for v in row[field].split(';') if v]
+                    raw.append(dict(row))
+        else:
+            raise ValueError(f"Unsupported import format: {fmt!r}")
+
+        valid, errors = self._validate_import_notebooks(raw)
+
+        result: Dict[str, Any] = {
+            'imported': 0,
+            'skipped': 0,
+            'errors': errors,
+            'notebooks': [],
+        }
+
+        for nb in valid:
+            nb_id = nb['id']
+            if nb_id in self.notebooks:
+                if strategy == 'overwrite':
+                    nb['updated_at'] = datetime.now().isoformat()
+                    self.notebooks[nb_id] = nb
+                    result['notebooks'].append({'id': nb_id, 'name': nb.get('name', ''), 'status': 'overwritten'})
+                    result['imported'] += 1
+                else:  # merge: skip duplicates
+                    result['notebooks'].append({'id': nb_id, 'name': nb.get('name', ''), 'status': 'skipped', 'reason': 'already exists'})
+                    result['skipped'] += 1
+            else:
+                nb.setdefault('created_at', datetime.now().isoformat())
+                nb.setdefault('updated_at', datetime.now().isoformat())
+                nb.setdefault('use_count', 0)
+                nb.setdefault('last_used', None)
+                self.notebooks[nb_id] = nb
+                result['notebooks'].append({'id': nb_id, 'name': nb.get('name', ''), 'status': 'imported'})
+                result['imported'] += 1
+
+        if result['imported']:
+            self._save_library()
+
+        print(f"Import complete: {result['imported']} imported, {result['skipped']} skipped, {len(errors)} errors")
+        return result
+
+    def _detect_format(self, file_path: Path) -> str:
+        """Detect file format from extension"""
+        suffix = file_path.suffix.lower()
+        if suffix == '.json':
+            return 'json'
+        if suffix == '.csv':
+            return 'csv'
+        raise ValueError(f"Cannot detect format from extension: {file_path.suffix!r}. Use .json or .csv")
+
+    def _validate_import_notebooks(self, notebooks: List[Dict]) -> Tuple[List[Dict], List[str]]:
+        """Validate notebook dicts for required fields.
+
+        Returns:
+            Tuple of (valid_list, error_strings)
+        """
+        valid = []
+        errors = []
+        seen_ids: set = set()
+
+        for i, nb in enumerate(notebooks):
+            nb_errors = []
+            for field in ('id', 'url', 'name'):
+                if not nb.get(field):
+                    nb_errors.append(f"missing required field '{field}'")
+            nb_id = nb.get('id')
+            if nb_id:
+                if nb_id in seen_ids:
+                    nb_errors.append(f"duplicate id '{nb_id}' in import file")
+                else:
+                    seen_ids.add(nb_id)
+            if nb_errors:
+                errors.append(f"Notebook #{i + 1}: {'; '.join(nb_errors)}")
+            else:
+                valid.append(nb)
+
+        return valid, errors
+
 
 def main():
     """Command-line interface for notebook management"""
@@ -496,6 +693,24 @@ def main():
 
     # Stats command
     subparsers.add_parser('stats', help='Show library statistics')
+
+    # Export command
+    export_parser = subparsers.add_parser('export', help='Export notebooks to file')
+    export_parser.add_argument('--format', choices=['json', 'csv'], default='json',
+                               help='Output format (default: json)')
+    export_parser.add_argument('--output', help='Output file path (default: auto-generated in exports/)')
+
+    # Import command
+    import_parser = subparsers.add_parser('import', help='Import notebooks from file')
+    import_parser.add_argument('--file', required=True, help='Path to import file (.json or .csv)')
+    import_parser.add_argument('--strategy', choices=['merge', 'overwrite'], default='merge',
+                               help='Conflict strategy: merge=skip existing, overwrite=replace (default: merge)')
+
+    # Add-source command
+    add_source_parser = subparsers.add_parser('add-source', help='Add a web URL source to a notebook')
+    add_source_parser.add_argument('--notebook-url', required=True, help='NotebookLM notebook URL')
+    add_source_parser.add_argument('--source-url', required=True, help='Web URL or YouTube URL to add')
+    add_source_parser.add_argument('--no-headless', action='store_true', help='Show browser window')
 
     args = parser.parse_args()
 
@@ -605,6 +820,34 @@ def main():
         if stats['most_used_notebook']:
             print(f"  Most used: {stats['most_used_notebook']['name']} ({stats['most_used_notebook']['use_count']} uses)")
         print(f"  Library path: {stats['library_path']}")
+
+    elif args.command == 'export':
+        dest = library.export_notebooks(
+            format=args.format,
+            output_path=getattr(args, 'output', None),
+        )
+        print(f"Export saved to: {dest}")
+
+    elif args.command == 'import':
+        result = library.import_notebooks(
+            file_path=args.file,
+            strategy=args.strategy,
+        )
+        print(json.dumps(result, indent=2))
+
+    elif args.command == 'add-source':
+        from browser_utils import add_source_web
+        success = add_source_web(
+            notebook_url=args.notebook_url,
+            source_url=args.source_url,
+            profile_id=getattr(args, 'profile', None),
+            headless=not args.no_headless,
+        )
+        if success:
+            print("Source added successfully")
+        else:
+            print("Failed to add source")
+            sys.exit(1)
 
     else:
         parser.print_help()

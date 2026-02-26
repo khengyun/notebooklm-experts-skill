@@ -121,3 +121,108 @@ class StealthUtils:
         StealthUtils.random_delay(100, 300)
         element.click()
         StealthUtils.random_delay(100, 300)
+
+
+# ------------------------------------------------------------------ #
+# M3 — Add Web Source                                                  #
+# ------------------------------------------------------------------ #
+
+def add_source_web(
+    notebook_url: str,
+    source_url: str,
+    profile_id: Optional[str] = None,
+    headless: bool = True,
+) -> bool:
+    """Add a web URL (or YouTube URL) as a source to a NotebookLM notebook.
+
+    Args:
+        notebook_url: Full URL of the target notebook
+        source_url: Web URL or YouTube URL to add as a source
+        profile_id: Profile to use; None = active profile
+        headless: Run browser headlessly
+
+    Returns:
+        True on success, False on failure
+    """
+    from patchright.sync_api import sync_playwright
+    from auth_manager import AuthManager
+
+    auth = AuthManager(profile_id=profile_id)
+    if not auth.is_authenticated():
+        print("Error: Not authenticated. Run auth_manager.py setup first.")
+        return False
+
+    playwright = None
+    context = None
+
+    try:
+        playwright = sync_playwright().start()
+        context = BrowserFactory.launch_persistent_context(
+            playwright,
+            headless=headless,
+            user_data_dir=str(auth.browser_profile_dir),
+            state_file=auth.state_file,
+        )
+        page = context.new_page()
+        page.set_viewport_size({"width": 1440, "height": 900})
+
+        print("  Navigating to notebook...")
+        page.goto(notebook_url, wait_until="domcontentloaded")
+        page.wait_for_timeout(5000)
+
+        # Open the add-sources dialog
+        add_btn_sel = 'button[aria-label="Thêm nguồn"]'
+        page.wait_for_selector(add_btn_sel, timeout=15000)
+        page.click(add_btn_sel)
+        page.wait_for_timeout(1500)
+        print("  Opened add-source dialog")
+
+        # Click the "Trang web" (Website) option inside the dialog
+        web_btn = page.query_selector('button:has-text("Trang web")')
+        if not web_btn:
+            print("  Error: 'Trang web' button not found in dialog")
+            return False
+        web_btn.click()
+        page.wait_for_timeout(1500)
+        print("  Clicked 'Trang web'")
+
+        # Fill URL into the query box textarea
+        url_input_selectors = [
+            'textarea[aria-label="Hộp truy vấn"]',
+            'textarea.query-box-input',
+        ]
+        filled = False
+        for sel in url_input_selectors:
+            try:
+                if page.is_visible(sel):
+                    page.fill(sel, source_url)
+                    filled = True
+                    print(f"  Filled URL via: {sel}")
+                    break
+            except Exception:
+                continue
+
+        if not filled:
+            print("  Error: URL input textarea not found")
+            return False
+
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(3000)
+        print(f"  Source submitted: {source_url}")
+        return True
+
+    except Exception as e:
+        print(f"  Error adding source: {e}")
+        return False
+
+    finally:
+        if context:
+            try:
+                context.close()
+            except Exception:
+                pass
+        if playwright:
+            try:
+                playwright.stop()
+            except Exception:
+                pass
