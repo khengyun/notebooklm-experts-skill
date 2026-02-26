@@ -10,6 +10,7 @@ import argparse
 import uuid
 import os
 import re
+from urllib.parse import unquote
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -53,6 +54,8 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
             state_file=auth.state_file,
         )
         page = context.new_page()
+        # Set viewport so full layout renders (sources panel visible)
+        page.set_viewport_size({"width": 1440, "height": 900})
 
         print("  Fetching notebook metadata...")
         page.goto(url, wait_until="domcontentloaded")
@@ -82,27 +85,58 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
 
         # Extract source names from the sources panel
         sources = []
-        source_selectors = [
-            '.source-item .source-title',
-            '.source-item-title',
-            '.source-list-item .title',
-            'source-item .title-text',
-            '[data-source-title]',
-            '.notebook-source .title',
-        ]
 
-        for sel in source_selectors:
+        # Click "Expand source panel" button to load full source list
+        expand_btns = [
+            'button[aria-label="Mở rộng bảng điều khiển nguồn"]',
+            'button[aria-label="Expand source panel"]',
+            'button[aria-label*="Nút xem nguồn"]',
+            'button[aria-label="Nút xem nguồn"]',
+            'button[aria-label*="View sources"]',
+        ]
+        clicked_expand = False
+        for btn_sel in expand_btns:
             try:
-                elements = page.query_selector_all(sel)
-                if elements:
-                    for el in elements:
-                        text = el.inner_text().strip()
-                        if text and text not in sources:
-                            sources.append(text)
-                    if sources:
-                        break
+                if page.is_visible(btn_sel):
+                    page.click(btn_sel)
+                    page.wait_for_timeout(3000)
+                    clicked_expand = True
+                    print(f"  Clicked expand btn: {btn_sel}")
+                    break
             except Exception:
                 continue
+        if not clicked_expand:
+            print("  Could not find expand sources button")
+
+        # Extract source names from aria-labels on source checkbox inputs
+        # These are populated after the sources panel is expanded
+        exclude_labels = {'Chọn tất cả các nguồn', 'Select all sources'}
+        try:
+            inputs = page.query_selector_all('source-picker input[aria-label]')
+            for el in inputs:
+                lbl = el.get_attribute('aria-label')
+                if lbl and lbl not in exclude_labels and lbl not in sources:
+                    sources.append(lbl)
+        except Exception:
+            pass
+
+        # Fallback selectors if source-picker inputs didn't work
+        if not sources:
+            source_selectors = [
+                'source-picker div[aria-label]',
+            ]
+            for sel in source_selectors:
+                try:
+                    elements = page.query_selector_all(sel)
+                    if elements:
+                        for el in elements:
+                            lbl = el.get_attribute('aria-label')
+                            if lbl and lbl not in exclude_labels and lbl not in sources:
+                                sources.append(lbl)
+                        if sources:
+                            break
+                except Exception:
+                    continue
 
         print(f"  Title: {title or '(not found)'}")
         if sources:
@@ -473,6 +507,8 @@ def main():
         name = args.name
         description = args.description
         topics_str = args.topics
+        # sources_list holds auto-detected sources; avoids comma-split corruption
+        sources_list = None
 
         # Auto-fetch metadata from notebook page when fields are missing
         if not args.no_fetch and (not name or not description or not topics_str):
@@ -487,12 +523,14 @@ def main():
                 print(f"  Using detected name: {name}")
 
             if not topics_str and meta.get('sources'):
-                topics_str = ','.join(meta['sources'])
-                print(f"  Using detected topics from sources: {topics_str}")
+                # Decode percent-encoded filenames (e.g. URL-encoded Vietnamese text)
+                sources_list = [unquote(s) for s in meta['sources']]
+                print(f"  Using detected topics from sources: {', '.join(sources_list)}")
 
             if not description:
-                if meta.get('sources'):
-                    description = f"Notebook with {len(meta['sources'])} sources: {', '.join(meta['sources'][:5])}"
+                src = sources_list or meta.get('sources', [])
+                if src:
+                    description = f"Notebook with {len(src)} sources: {', '.join(src[:5])}"
                 elif name:
                     description = name
                 print(f"  Using generated description: {description}")
@@ -503,11 +541,15 @@ def main():
             print(f"  Warning: Could not detect name, using: {name}")
         if not description:
             description = name
-        if not topics_str:
-            topics_str = 'general'
-            print("  Warning: No topics detected, using: general")
 
-        topics = [t.strip() for t in topics_str.split(',')]
+        # Build topics list: prefer sources_list (preserves commas in names),
+        # fall back to comma-split of user-provided topics_str
+        if sources_list is not None:
+            topics = sources_list
+        elif topics_str:
+            topics = [t.strip() for t in topics_str.split(',')]
+        else:
+            topics = []
         use_cases = [u.strip() for u in args.use_cases.split(',')] if args.use_cases else None
         tags = [t.strip() for t in args.tags.split(',')] if args.tags else None
 
