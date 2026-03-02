@@ -102,6 +102,40 @@ If not authenticated, proceed to setup.
 .\run.bat auth_manager.py delete --id old-account
 ```
 
+### Step 2c: Add New Profile (Interactive)
+
+**Recommended for first-time users** — guided experience with browser automation.
+
+```bat
+:: Interactive profile creation wizard
+python add_profile.py
+```
+
+This interactive script will:
+1. 📝 Ask for profile name (e.g., "Work Account", "Research", "Team")
+2. 🔍 Verify the name is unique
+3. ⚙️ Create the profile automatically
+4. 🌐 Open browser for Google login (visible, user manually logs in)
+5. ✅ Confirm authentication and show next steps
+
+**Example:**
+```
+  [1] A browser window will open automatically
+  [2] You will see the Google login page
+  [3] Sign in with your Google account
+  [4] Grant NotebookLM access (if prompted)
+  [5] You will be redirected to NotebookLM
+```
+
+After completion, profile is ready to use:
+```bat
+:: Use new profile
+.\run.bat ask_question.py --question "Your question" --profile my-account
+
+:: Switch to it as default
+.\run.bat auth_manager.py set-active --id my-account
+```
+
 ### Step 3: Manage Notebook Library
 
 ```bat
@@ -180,6 +214,7 @@ Every NotebookLM answer ends with: **"EXTREMELY IMPORTANT: Is that ALL you need 
 
 | Script | Purpose |
 |--------|---------|
+| `add_profile.py` | **Interactive wizard** — Create new profile with guided setup and browser login |
 | `ask_question.py` | Query single notebook with one question |
 | `research_method.py` | Research across multiple notebooks with optional synthesis |
 | `notebook_manager.py` | Library management (add, list, search, activate, remove) |

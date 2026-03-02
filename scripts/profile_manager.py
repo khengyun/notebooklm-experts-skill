@@ -243,3 +243,61 @@ class ProfileManager:
                     print(f"     Auth age: {p['auth_age_days']} days | EXPIRED {abs(p['expires_in_days'])} days ago")
             if p["status"] in ("EXPIRED", "NOT_AUTHENTICATED"):
                 print(f"     Action: Run 'auth_manager.py reauth --profile {p['id']}'")
+
+
+def main():
+    """Command-line interface for profile management."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description='Manage NotebookLM profiles')
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+
+    # list command
+    subparsers.add_parser('list', help='List all profiles')
+
+    # create command
+    create_parser = subparsers.add_parser('create', help='Create a new profile')
+    create_parser.add_argument('--name', required=True, help='Profile display name')
+
+    # set-active command
+    active_parser = subparsers.add_parser('set-active', help='Set active profile')
+    active_parser.add_argument('--id', required=True, help='Profile ID')
+
+    # delete command
+    delete_parser = subparsers.add_parser('delete', help='Delete a profile')
+    delete_parser.add_argument('--id', required=True, help='Profile ID')
+
+    args = parser.parse_args()
+    pm = ProfileManager()
+
+    if args.command == 'list':
+        pm.print_profiles()
+
+    elif args.command == 'create':
+        entry = pm.create_profile(args.name)
+        print(f"Profile created: {entry['id']}")
+        print(f"Next steps:")
+        print(f"  1. Authenticate this profile:")
+        print(f"     python scripts/run.py auth_manager.py setup --profile {entry['id']}")
+        print(f"  2. Or set it as active and authenticate later:")
+        print(f"     python scripts/run.py profile_manager.py set-active --id {entry['id']}")
+
+    elif args.command == 'set-active':
+        pm.set_active(args.id)
+        profile = pm._find(args.id)
+        if profile:
+            print(f"Active profile: {profile['name']} ({args.id})")
+
+    elif args.command == 'delete':
+        if pm.delete_profile(args.id):
+            print(f"Profile deleted: {args.id}")
+        else:
+            sys.exit(1)
+
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
