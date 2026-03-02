@@ -6,7 +6,7 @@ Query Google NotebookLM notebooks directly from your AI agent for source-grounde
 
 ## 🚀 Quick Install
 
-**Paste this into Claude Code, Copilot, or any AI agent chat:**
+**Paste this into GitHub Copilot chat:**
 
 ```
 Install this skill: https://gist.github.com/khengyun/3ad656c8b9eea4f1c141389c962f5297
@@ -18,13 +18,14 @@ The agent will automatically:
 - Verify installation
 - Show next steps
 
-**Supported agents**: Claude Code · GitHub Copilot · OpenAI Codex CLI · Gemini CLI
+**Supported agents**: GitHub Copilot
 
 ---
 
 ## Features
 
 - **Source-grounded answers** — Gemini responds only from your NotebookLM documents, drastically reducing hallucinations.
+- **Single & research queries** — Query one notebook or research across many with optional synthesis.
 - **Persistent auth** — authenticate once; sessions are saved across runs so you never log in again.
 - **Notebook library** — add, remove, search, and switch active notebooks from the CLI.
 - **Export notebooks** — dump your full library to JSON or CSV with a single command.

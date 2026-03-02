@@ -10,293 +10,228 @@ description: Best practices and workflow patterns
 
 ### Pattern 1: Research Session
 
-For deep research on a specific topic:
+```mermaid
+stateDiagram-v2
+    [*] --> CheckLib: notebook_manager.py list
 
-```bash
-# 1. Check library
-.\\run.bat notebook_manager.py list
+    CheckLib --> ActivateNB: activate --id nb_docs
+    ActivateNB --> BroadQ: Step 1 Broad question
+    BroadQ --> AskBroad: ask_question.py overview
+    AskBroad --> SpecificQ: Step 2 Specific questions
 
-# 2. Activate relevant notebook
-.\\run.bat notebook_manager.py activate --id nb_docs
-
-# 3. Ask initial broad question
-.\\run.bat ask_question.py \
-  --question "Give me an overview of authentication in this system"
-
-# 4. Follow up with specific questions
-.\\run.bat ask_question.py \
-  --question "What are the specific OAuth 2.0 endpoints?"
-
-.\\run.bat ask_question.py \
-  --question "How do I handle token refresh?"
-
-# 5. Synthesize findings
+    SpecificQ --> Q1: ask_question.py specific Q1
+    Q1 --> Q2: ask_question.py specific Q2
+    Q2 --> Q3: ask_question.py specific Q3
+    Q3 --> Synthesize: Step 3 Combine answers
+    Synthesize --> [*]
 ```
 
 ---
 
 ### Pattern 2: Multi-Notebook Research
 
-When information spans multiple notebooks:
-
-```bash
-# Query each notebook separately
-.\\run.bat ask_question.py \
-  --question "API rate limits" \
-  --notebook-id nb_api_docs
-
-.\\run.bat ask_question.py \
-  --question "Rate limiting best practices" \
-  --notebook-id nb_architecture
-
-.\\run.bat ask_question.py \
-  --question "Historical rate limit changes" \
-  --notebook-id nb_changelog
-
-# Combine answers manually
+```mermaid
+stateDiagram-v2
+    [*] --> QueryNB1: ask_question.py --notebook-id nb_api
+    QueryNB1 --> QueryNB2: ask_question.py --notebook-id nb_arch
+    QueryNB2 --> QueryNB3: ask_question.py --notebook-id nb_changelog
+    QueryNB3 --> CombineAnswers: Synthesize across notebooks
+    CombineAnswers --> [*]
 ```
 
 ---
 
 ### Pattern 3: Discovery Before Add
 
-When adding a new notebook:
+```mermaid
+stateDiagram-v2
+    [*] --> QueryContent: ask_question.py --notebook-url URL
 
-```bash
-# Step 1: Query to discover content
-.\\run.bat ask_question.py \
-  --question "What is the content of this notebook? What topics are covered?" \
-  --notebook-url "https://notebooklm.google.com/notebook/..."
+    QueryContent --> ExtractMeta: Parse name, desc, topics
+    ExtractMeta --> AddWithMeta: notebook_manager.py add
+    AddWithMeta --> [*]: Notebook registered with accurate metadata
 
-# Step 2: Add with discovered information
-.\\run.bat notebook_manager.py add \
-  --url "https://notebooklm.google.com/notebook/..." \
-  --name "[Based on content]" \
-  --description "[Based on content]" \
-  --topics "[Based on content]"
+    note right of QueryContent
+        Question: What is the content?
+        What topics are covered?
+    end note
 ```
 
 ---
 
 ## Question Strategies
 
-### Effective Question Patterns
+```mermaid
+stateDiagram-v2
+    [*] --> PickStrategy
 
-**1. Start Broad, Then Narrow**
-```bash
-# First: Overview
-"What does this documentation cover?"
+    state PickStrategy <<choice>>
+    PickStrategy --> BroadToNarrow: Start broad, then narrow
+    PickStrategy --> RequestExamples: Ask for examples
+    PickStrategy --> AskComparisons: Compare A vs B
+    PickStrategy --> Troubleshoot: Debug specific issue
 
-# Then: Specifics
-"How do I implement the webhook handler?"
+    BroadToNarrow --> Overview: What does this cover?
+    Overview --> Specific: How do I implement X?
+    Specific --> [*]
+
+    RequestExamples --> Example: Show example of X
+    Example --> [*]
+
+    AskComparisons --> Diff: Differences between A and B?
+    Diff --> [*]
+
+    Troubleshoot --> Errors: Common errors when doing X?
+    Errors --> [*]
 ```
 
-**2. Request Examples**
-```bash
-"Show me an example of implementing X"
-"What does a typical Y configuration look like?"
-```
+### Anti-Patterns
 
-**3. Ask for Comparisons**
-```bash
-"What are the differences between approach A and B?"
-"When should I use X vs Y?"
-```
-
-**4. Troubleshooting Questions**
-```bash
-"What are common errors when doing X?"
-"How do I debug Y issue?"
-```
-
----
-
-### Question Anti-Patterns
-
-**Avoid:**
-- ❌ "Tell me everything" (too broad)
-- ❌ "What is on page 47?" (NotebookLM doesn't know page numbers)
-- ❌ "Fix this code" (no code provided)
-- ❌ "Why did they design it this way?" (NotebookLM can't infer intent)
-
-**Instead:**
-- ✅ "What are the main sections of this documentation?"
-- ✅ "What are the configuration options for X?"
-- ✅ "How do I implement Y feature?"
-- ✅ "What does the documentation say about Z design decision?"
+| Avoid | Instead |
+|-------|---------|
+| "Tell me everything" | "What are the main sections?" |
+| "What is on page 47?" | "Configuration options for X?" |
+| "Fix this code" | "How to implement Y feature?" |
+| "Why did they design it?" | "What does docs say about Z decision?" |
 
 ---
 
 ## Library Organization
 
-### Recommended Structure
+```mermaid
+stateDiagram-v2
+    [*] --> ChooseStrategy
 
-Organize notebooks by:
+    state ChooseStrategy <<choice>>
+    ChooseStrategy --> ByProject: Organize by project
+    ChooseStrategy --> ByTopic: Organize by topic
+    ChooseStrategy --> ByType: Organize by type
 
-**By Project:**
-```
-Project A Docs
-Project A API
-Project A Architecture
+    state ByProject {
+        [*] --> ProjA_Docs: Project A Docs
+        ProjA_Docs --> ProjA_API: Project A API
+        ProjA_API --> ProjB_Docs: Project B Docs
+        ProjB_Docs --> [*]
+    }
 
-Project B Docs
-Project B API
-```
+    state ByTopic {
+        [*] --> FrontendGuide: frontend, react, css
+        FrontendGuide --> BackendStd: backend, api, rest
+        BackendStd --> DBSchema: database, postgres
+        DBSchema --> [*]
+    }
 
-**By Topic:**
-```
-Frontend Guidelines
-Backend Standards
-Database Schema
-DevOps Runbooks
-```
+    state ByType {
+        [*] --> UserDocs: reference, guide
+        UserDocs --> APIRef: api, endpoints
+        APIRef --> ADRs: architecture, decisions
+        ADRs --> [*]
+    }
 
-**By Type:**
-```
-User Documentation
-API Reference
-Architecture Decisions
-Meeting Notes
-```
-
-### Topic Tagging Strategy
-
-Use consistent topic tags:
-
-```bash
-# Technical areas
---topics "api,rest,authentication"
---topics "frontend,react,css"
---topics "database,postgres,schema"
-
-# Project phases
---topics "planning,requirements"
---topics "implementation,code"
---topics "deployment,ops"
-
-# Content types
---topics "reference,api"
---topics "guide,tutorial"
---topics "meeting,decisions"
+    ByProject --> [*]
+    ByTopic --> [*]
+    ByType --> [*]
 ```
 
 ---
 
 ## Session Management
 
-### Daily Workflow
+```mermaid
+stateDiagram-v2
+    [*] --> DailyWorkflow
 
-```bash
-# Morning: Check library
-.\\run.bat notebook_manager.py list
+    state DailyWorkflow {
+        [*] --> Morning: notebook_manager.py list
+        Morning --> DuringWork: ask_question.py as needed
+        DuringWork --> EndOfDay: No cleanup needed
+        EndOfDay --> [*]
+    }
 
-# During work: Query as needed
-.\\run.bat ask_question.py --question "..."
+    DailyWorkflow --> WeeklyMaint
 
-# End of day: No action needed
-# Sessions are stateless, no cleanup required
-```
+    state WeeklyMaint {
+        [*] --> CheckStale: notebook_manager.py stats
+        CheckStale --> RemoveOld: remove --id nb_old
+        RemoveOld --> CleanTemp: cleanup --preserve-library
+        CleanTemp --> [*]
+    }
 
-### Weekly Maintenance
-
-```bash
-# Check for stale notebooks
-.\\run.bat notebook_manager.py stats
-
-# Remove unused notebooks
-.\\run.bat notebook_manager.py remove --id nb_old
-
-# Cleanup temp files
-.\\run.bat cleanup_manager.py --preserve-library
+    WeeklyMaint --> [*]
 ```
 
 ---
 
 ## Rate Limit Management
 
-### Tracking Usage
+```mermaid
+stateDiagram-v2
+    [*] --> TrackUsage: 50 queries/day
 
-Free accounts: 50 queries/day
+    TrackUsage --> chk1
+    state chk1 <<choice>>
+    chk1 --> BatchQs: Strategy 1: Batch questions
+    chk1 --> UseActive: Strategy 2: Set active notebook once
+    chk1 --> CacheAnswers: Strategy 3: Save important answers
 
-**Conservation strategies:**
+    BatchQs --> SingleQ: Combine 3 questions into 1 comprehensive
+    SingleQ --> [*]
 
-1. **Batch questions:**
-   ```bash
-   # Instead of 3 separate questions:
-   # "What is X?" + "What is Y?" + "What is Z?"
-   
-   # Ask one comprehensive question:
-   .\\run.bat ask_question.py \
-     --question "What are X, Y, and Z, and how do they relate?"
-   ```
+    UseActive --> ActivateOnce: activate --id nb_main
+    ActivateOnce --> QueryNoId: ask_question.py --question (no --notebook-id)
+    QueryNoId --> [*]
 
-2. **Use library for context:**
-   ```bash
-   # Set active notebook once
-   .\\run.bat notebook_manager.py activate --id nb_main
-   
-   # Then query without --notebook-id
-   .\\run.bat ask_question.py --question "..."
-   ```
-
-3. **Cache important answers:**
-   - Save critical responses to local files
-   - Reference instead of re-querying
+    CacheAnswers --> SaveLocal: Save responses to local files
+    SaveLocal --> ReferenceLocal: Read local instead of re-query
+    ReferenceLocal --> [*]
+```
 
 ---
 
-## Security Best Practices
+## Security
 
-### Data Protection
+```mermaid
+stateDiagram-v2
+    [*] --> DataProtection
 
-1. **Never commit data directory:**
-   ```bash
-   # .gitignore should include:
-   data/
-   .venv/
-   __pycache__/
-   ```
+    state DataProtection {
+        [*] --> GitIgnore: Never commit data/
+        GitIgnore --> LocalOnly: Library data is local only
+        LocalOnly --> SessionIsolation: Each query is independent
+        SessionIsolation --> [*]
+    }
 
-2. **Library data is local only:**
-   - Notebook metadata stored locally
-   - No cloud sync of library
-   - Authentication in browser_state/
+    DataProtection --> [*]
 
-3. **Session isolation:**
-   - Each query is independent
-   - No persistent conversation history
-   - No server-side data storage
+    note right of DataProtection
+        .gitignore must include:
+        data/
+        .venv/
+        __pycache__/
+    end note
+```
 
 ---
 
-## Integration Tips
+## Integration
 
-### With Claude Code
+```mermaid
+stateDiagram-v2
+    [*] --> UserAsks: User question
 
-**Always check notebook before answering:**
+    UserAsks --> CheckNB: Query NotebookLM for internal info
+    CheckNB --> GotInternal: Got notebook answer
 
-```
-User: "How does the API handle errors?"
+    GotInternal --> chk1
+    state chk1 <<choice>>
+    chk1 --> Synthesize: Answer sufficient
+    chk1 --> WebSearch: Need external context
 
-Claude: "Let me check your API documentation..."
+    WebSearch --> GotExternal: Got web results
+    GotExternal --> Synthesize
 
-[Run notebooklm query]
-
-"According to your API docs, error handling works like this..."
-```
-
-### With Other Tools
-
-**Combine with web search:**
-```bash
-# 1. Query notebook for internal info
-.\\run.bat ask_question.py \
-  --question "What is our error handling approach?"
-
-# 2. Search web for external context
-# [Use WebSearch tool]
-
-# 3. Synthesize both sources
+    Synthesize --> RespondUser: Combine all sources
+    RespondUser --> [*]
 ```
 
 ---

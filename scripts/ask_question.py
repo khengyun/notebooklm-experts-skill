@@ -168,7 +168,7 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
             return None
 
         print("  Got answer!")
-        # Add follow-up reminder to encourage Claude to ask more questions
+        # Add follow-up reminder to encourage Copilot to ask more questions
         return answer + FOLLOW_UP_REMINDER
 
     except Exception as e:

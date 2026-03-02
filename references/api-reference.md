@@ -6,210 +6,143 @@ description: Detailed API reference for all notebooklm scripts
 
 # API Reference
 
+## Overview
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> AuthManager: First time setup
+    AuthManager --> NotebookMgr: Authenticated
+    NotebookMgr --> AskQuestion: Notebooks ready
+    AskQuestion --> CleanupMgr: Maintenance
+    CleanupMgr --> [*]
+```
+
+---
+
 ## Authentication Manager (`auth_manager.py`)
 
-### Commands
+```mermaid
+stateDiagram-v2
+    [*] --> Unauthenticated
 
-#### `setup`
-Initial authentication with visible browser.
+    Unauthenticated --> BrowserOpen: setup
+    BrowserOpen --> WaitLogin: Chrome opens visible
+    WaitLogin --> Authenticated: User completes Google login
+
+    Authenticated --> chk1
+    state chk1 <<choice>>
+    chk1 --> Authenticated: status = valid
+    chk1 --> SessionExpired: status = expired
+
+    SessionExpired --> BrowserOpen: reauth
+
+    Authenticated --> Cleared: clear
+    Cleared --> Unauthenticated
+
+    Authenticated --> [*]
+
+    note right of BrowserOpen
+        MUST be visible browser
+        Never headless
+    end note
+
+    note left of Authenticated
+        Saved to
+        data/browser_state/
+    end note
+```
 
 ```bash
-.\\run.bat auth_manager.py setup
-```
-
-**Behavior:**
-- Opens visible Chrome window
-- Navigates to Google login
-- User manually completes authentication
-- Saves session state for future use
-
-**Output:**
-```
-✓ Authentication successful
-  Session saved to ~/.claude/skills/notebooklm/data/browser_state/
-```
-
-#### `status`
-Check current authentication state.
-
-```bash
-.\\run.bat auth_manager.py status
-```
-
-**Output (authenticated):**
-```
-✓ Authenticated as user@example.com
-  Session valid until: 2024-01-15
-```
-
-**Output (not authenticated):**
-```
-✗ Not authenticated
-  Run: .\\run.bat auth_manager.py setup
-```
-
-#### `reauth`
-Force re-authentication.
-
-```bash
-.\\run.bat auth_manager.py reauth
-```
-
-**Use when:**
-- Session expired
-- Authentication errors persist
-- Switching Google accounts
-
-#### `clear`
-Remove all authentication data.
-
-```bash
-.\\run.bat auth_manager.py clear
+.\run.bat auth_manager.py setup    # First time / new account
+.\run.bat auth_manager.py status   # Check session
+.\run.bat auth_manager.py reauth   # Refresh expired session
+.\run.bat auth_manager.py clear    # Remove all auth data
 ```
 
 ---
 
 ## Notebook Manager (`notebook_manager.py`)
 
-### Commands
+```mermaid
+stateDiagram-v2
+    [*] --> EmptyLib
 
-#### `add`
-Add notebook to library.
+    EmptyLib --> HasNotebooks: add --url --name --description --topics
+
+    state HasNotebooks {
+        [*] --> Registered
+        Registered --> Listed: list
+        Registered --> SearchResult: search --query
+        Registered --> ActiveNB: activate --id
+        ActiveNB --> ReadyToQuery
+    }
+
+    HasNotebooks --> HasNotebooks: add more notebooks
+    HasNotebooks --> chk1
+    state chk1 <<choice>>
+    chk1 --> EmptyLib: remove last notebook
+    chk1 --> HasNotebooks: remove, others remain
+
+    HasNotebooks --> [*]: stats
+```
 
 ```bash
-.\\run.bat notebook_manager.py add \
-  --url "https://notebooklm.google.com/notebook/..." \
-  --name "API Documentation" \
-  --description "Complete REST API docs for v2.0" \
-  --topics "api,rest,documentation"
+.\run.bat notebook_manager.py add --url URL --name NAME --description DESC --topics TAGS
+.\run.bat notebook_manager.py list
+.\run.bat notebook_manager.py search --query KEYWORD
+.\run.bat notebook_manager.py activate --id ID
+.\run.bat notebook_manager.py remove --id ID
+.\run.bat notebook_manager.py stats
 ```
 
-**Parameters:**
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--url` | Yes | Full NotebookLM URL |
-| `--name` | Yes | Short descriptive name |
-| `--description` | Yes | Detailed content description |
-| `--topics` | Yes | Comma-separated topic tags |
-
-**Output:**
-```
-✓ Notebook added
-  ID: nb_abc123
-  Name: API Documentation
-  Topics: api, rest, documentation
-```
-
-#### `list`
-Display all notebooks in library.
-
-```bash
-.\\run.bat notebook_manager.py list
-```
-
-**Output:**
-```
-Your Notebook Library:
-
-1. API Documentation (nb_abc123)
-   Topics: api, rest, documentation
-   Added: 2024-01-10
-
-2. Product Specs (nb_def456)
-   Topics: product, roadmap
-   Active: ✓
-```
-
-#### `search`
-Find notebooks by topic or keyword.
-
-```bash
-.\\run.bat notebook_manager.py search --query "api"
-```
-
-**Output:**
-```
-Matching notebooks:
-
-1. API Documentation (nb_abc123)
-   Topics: api, rest, documentation
-```
-
-#### `activate`
-Set default notebook for queries.
-
-```bash
-.\\run.bat notebook_manager.py activate --id nb_abc123
-```
-
-**Output:**
-```
-✓ Active notebook set: API Documentation (nb_abc123)
-```
-
-#### `remove`
-Delete notebook from library.
-
-```bash
-.\\run.bat notebook_manager.py remove --id nb_abc123
-```
-
-**Output:**
-```
-✓ Notebook removed: API Documentation
-```
-
-#### `stats`
-Show library statistics.
-
-```bash
-.\\run.bat notebook_manager.py stats
-```
-
-**Output:**
-```
-Library Statistics:
-  Total notebooks: 5
-  Topics covered: 12
-  Last added: 2024-01-10
-```
+| Parameter | Required | Example |
+|-----------|----------|---------|
+| `--url` | Yes | `https://notebooklm.google.com/notebook/...` |
+| `--name` | Yes | `"API Documentation"` |
+| `--description` | Yes | `"Complete REST API docs"` |
+| `--topics` | Yes | `"api,rest,docs"` |
 
 ---
 
 ## Question Interface (`ask_question.py`)
 
-### Basic Query
+```mermaid
+stateDiagram-v2
+    [*] --> SelectNB
 
-```bash
-.\\run.bat ask_question.py \
-  --question "What are the authentication methods?"
+    state SelectNB <<choice>>
+    SelectNB --> UseActive: no --notebook-id/url
+    SelectNB --> UseById: --notebook-id ID
+    SelectNB --> UseByUrl: --notebook-url URL
+
+    UseActive --> SendQuery
+    UseById --> SendQuery
+    UseByUrl --> SendQuery
+
+    SendQuery --> WaitResponse: Submit question
+    WaitResponse --> GotAnswer
+
+    GotAnswer --> chk1
+    state chk1 <<choice>>
+    chk1 --> FollowUp: Needs more detail
+    chk1 --> Complete: Answer sufficient
+
+    FollowUp --> SendQuery: Ask follow-up
+    Complete --> [*]
+
+    note right of SendQuery
+        --show-browser for debug
+    end note
 ```
 
-### Query Specific Notebook
-
 ```bash
-.\\run.bat ask_question.py \
-  --question "What are the authentication methods?" \
-  --notebook-id nb_abc123
+.\run.bat ask_question.py --question "..."                          # Active notebook
+.\run.bat ask_question.py --question "..." --notebook-id nb_abc123  # By ID
+.\run.bat ask_question.py --question "..." --notebook-url URL       # By URL
+.\run.bat ask_question.py --question "..." --show-browser           # Debug mode
 ```
 
-### Query by URL
-
-```bash
-.\\run.bat ask_question.py \
-  --question "What are the authentication methods?" \
-  --notebook-url "https://notebooklm.google.com/notebook/..."
-```
-
-### Debug Mode
-
-```bash
-.\\run.bat ask_question.py \
-  --question "What are the authentication methods?" \
-  --show-browser
-```
-
-**Parameters:**
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `--question` | Yes | Question to ask |
@@ -217,58 +150,48 @@ Library Statistics:
 | `--notebook-url` | No* | Direct notebook URL |
 | `--show-browser` | No | Show browser window |
 
-*One of `--notebook-id` or `--notebook-url` required if no active notebook set
-
-**Output:**
-```
-Question: What are the authentication methods?
-
-Answer:
-According to the API documentation, there are three authentication methods:
-
-1. API Key (simplest, for server-to-server)
-2. OAuth 2.0 (for user-facing applications)
-3. JWT Tokens (for internal microservices)
-
-EXTREMELY IMPORTANT: Is that ALL you need to know?
-```
-
 ---
 
 ## Cleanup Manager (`cleanup_manager.py`)
 
-### Preview Cleanup
+```mermaid
+stateDiagram-v2
+    [*] --> Preview: cleanup_manager.py
+
+    Preview --> chk1
+    state chk1 <<choice>>
+    chk1 --> FullClean: --confirm
+    chk1 --> SafeClean: --preserve-library
+
+    state FullClean {
+        [*] --> RmCache
+        RmCache --> RmTranscripts
+        RmTranscripts --> RmAuth
+        RmAuth --> RmLibrary
+        RmLibrary --> [*]
+    }
+
+    state SafeClean {
+        [*] --> CleanCache
+        CleanCache --> CleanTranscripts
+        CleanTranscripts --> CleanTemp
+        CleanTemp --> [*]
+    }
+
+    FullClean --> [*]
+    SafeClean --> [*]
+
+    note right of SafeClean
+        Keeps: notebooks + auth
+        Removes: cache, temp, transcripts
+    end note
+```
 
 ```bash
-.\\run.bat cleanup_manager.py
+.\run.bat cleanup_manager.py                    # Preview
+.\run.bat cleanup_manager.py --confirm          # Full cleanup
+.\run.bat cleanup_manager.py --preserve-library # Keep notebooks + auth
 ```
-
-**Output:**
-```
-Cleanup Preview:
-  Browser cache: 150MB
-  Old transcripts: 12 files
-  Temp files: 5 files
-
-Run with --confirm to execute cleanup
-```
-
-### Execute Cleanup
-
-```bash
-.\\run.bat cleanup_manager.py --confirm
-```
-
-### Preserve Library
-
-```bash
-.\\run.bat cleanup_manager.py --preserve-library
-```
-
-**Keeps:**
-- Notebook metadata
-- Authentication state
-- Removes: Cache, temp files, old transcripts
 
 ---
 
@@ -287,7 +210,7 @@ Run with --confirm to execute cleanup
 
 ## Data File Structure
 
-### `~/.claude/skills/notebooklm/data/library.json`
+### `<skill-dir>/data/library.json`
 
 ```json
 {
@@ -307,7 +230,7 @@ Run with --confirm to execute cleanup
 }
 ```
 
-### `~/.claude/skills/notebooklm/data/auth_info.json`
+### `<skill-dir>/data/auth_info.json`
 
 ```json
 {
@@ -316,4 +239,30 @@ Run with --confirm to execute cleanup
   "session_expires": "2024-01-20T00:00:00Z",
   "last_verified": "2024-01-15T10:00:00Z"
 }
+```
+
+---
+
+## Module Classes
+
+```mermaid
+stateDiagram-v2
+    state NotebookLibrary {
+        [*] --> nb_add: add_notebook
+        nb_add --> nb_list: list_notebooks
+        nb_list --> nb_search: search_notebooks
+        nb_search --> nb_get: get_notebook
+        nb_get --> nb_activate: activate_notebook
+        nb_activate --> nb_remove: remove_notebook
+        nb_remove --> [*]
+    }
+
+    state AuthMgr {
+        [*] --> is_auth: is_authenticated
+        is_auth --> setup: setup_auth
+        setup --> get_info: get_auth_info
+        get_info --> validate: validate_auth
+        validate --> clear: clear_auth
+        clear --> [*]
+    }
 ```

@@ -9,10 +9,6 @@ data/
 data/*
 data/**/*
 
-# Claude-specific
-.claude/
-*.claude
-
 # Python
 __pycache__/
 *.py[cod]

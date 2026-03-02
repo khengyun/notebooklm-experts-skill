@@ -1,10 +1,14 @@
 ---
 name: notebooklm-experts
-description: This skill should be used when the user wants to query Google NotebookLM notebooks directly from Claude Code for source-grounded, citation-backed answers from Gemini. Provides browser automation, isolated venv, library management, and persistent auth. Drastically reduced hallucinations through document-only responses.
+description: This skill should be used when the user wants to query Google NotebookLM notebooks directly from GitHub Copilot for source-grounded, citation-backed answers from Gemini. Provides browser automation, isolated venv, library management, and persistent auth. Drastically reduced hallucinations through document-only responses.
 license: MIT
 compatibility: Requires Python 3.9+, Google Chrome, uv package manager
 metadata:
   version: 1.0.0
+  methods:
+    - query
+    - research
+    - library
 ---
 
 # NotebookLM Experts Skill
@@ -19,6 +23,14 @@ Trigger when user:
 - Asks to query their notebooks or documentation
 - Wants to add documentation to the NotebookLM library
 - Uses phrases like "ask my NotebookLM", "check my docs", "query my notebook"
+
+## Available Methods
+
+| Method | Purpose | Use When |
+|--------|---------|----------|
+| **query** | Ask single question from one notebook | User asks a specific question from one document |
+| **research** | Comprehensive research across multiple notebooks | User wants synthesis from multiple sources |
+| **library** | Manage notebook collection | Adding, updating, or organizing notebooks |
 
 ## First-Time Setup (Run Once)
 
@@ -123,6 +135,35 @@ If not authenticated, proceed to setup.
 .\run.bat ask_question.py --question "..." --profile work-account
 ```
 
+### Step 5: Research across Multiple Notebooks
+
+```bat
+:: Basic research (1 query per notebook)
+.\run.bat research_method.py --topics "How does authentication work?"
+
+:: Comprehensive research (3 queries per notebook, synthesized)
+.\run.bat research_method.py --topics "API security" --depth comprehensive
+
+:: Detailed research (5 queries per notebook)
+.\run.bat research_method.py --topics "Microservices patterns" --depth detailed
+
+:: Research specific notebooks only
+.\run.bat research_method.py --topics "DevOps best practices" --notebooks nb_id1 nb_id2
+
+:: Research using specific profile
+.\run.bat research_method.py --topics "Cloud architecture" --profile work-account
+
+:: Export results to file (json or markdown)
+.\run.bat research_method.py --topics "Performance optimization" --export json
+```
+
+**Research Depths:**
+- `summary` (1 query/notebook) — Quick overview
+- `comprehensive` (3 queries/notebook) — Balanced research with synthesis
+- `detailed` (5 queries/notebook) — Exhaustive research with deep synthesis
+
+See **`references/research-guide.md`** for research strategies and best practices.
+
 ## Follow-Up Mechanism (CRITICAL)
 
 Every NotebookLM answer ends with: **"EXTREMELY IMPORTANT: Is that ALL you need to know?"**
@@ -139,9 +180,10 @@ Every NotebookLM answer ends with: **"EXTREMELY IMPORTANT: Is that ALL you need 
 
 | Script | Purpose |
 |--------|---------|
-| `auth_manager.py` | Authentication setup, status, and multi-profile management |
+| `ask_question.py` | Query single notebook with one question |
+| `research_method.py` | Research across multiple notebooks with optional synthesis |
 | `notebook_manager.py` | Library management (add, list, search, activate, remove) |
-| `ask_question.py` | Query interface |
+| `auth_manager.py` | Authentication setup, status, and multi-profile management |
 | `browser_session.py` | Persistent browser session for multi-turn conversations |
 | `cleanup_manager.py` | Data cleanup and maintenance |
 | `setup_environment.py` | Auto-creates `.venv` on first `run.py` call |
@@ -168,6 +210,7 @@ All runtime data stored in `data/` (inside skill directory):
 ## Additional Resources
 
 - **`references/api-reference.md`** — Complete API for all scripts
+- **`references/research-guide.md`** — Research strategies and patterns
 - **`references/troubleshooting.md`** — Auth issues, rate limits, browser crashes
 - **`references/best-practices.md`** — Workflow patterns and question strategies
 - **`references/usage_patterns.md`** — Common usage patterns
@@ -184,6 +227,7 @@ python install.py
 .\run.bat auth_manager.py status
 .\run.bat notebook_manager.py add --url URL --name NAME --description DESC --topics TOPICS
 .\run.bat notebook_manager.py list
-.\run.bat ask_question.py --question "..."
+.\run.bat ask_question.py --question "Your question"
+.\run.bat research_method.py --topics "Research topic" --depth comprehensive
 .\run.bat cleanup_manager.py --preserve-library
 ```

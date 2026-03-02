@@ -1,353 +1,274 @@
 ﻿# NotebookLM Skill Usage Patterns
 
-Advanced patterns for using the NotebookLM skill effectively.
-
-## Critical: Always Use run.bat
-
-**Every command must use the run.py wrapper:**
-```bash
-# CORRECT:
-.\\run.bat auth_manager.py status
-.\\run.bat ask_question.py --question "..."
-
-# WRONG:
-python scripts/auth_manager.py status  # Will fail!
-```
-
 ## Pattern 1: Initial Setup
 
-```bash
-# 1. Check authentication (using run.bat!)
-.\\run.bat auth_manager.py status
+```mermaid
+stateDiagram-v2
+    [*] --> CheckAuth: Step 1
 
-# 2. If not authenticated, setup (Browser MUST be visible!)
-.\\run.bat auth_manager.py setup
-# Tell user: "Please log in to Google in the browser window"
+    CheckAuth --> chk1: auth_manager.py status
+    state chk1 <<choice>>
+    chk1 --> Authenticated: Valid session
+    chk1 --> NeedSetup: Not authenticated
 
-# 3. Add first notebook - ASK USER FOR DETAILS FIRST!
-# Ask: "What does this notebook contain?"
-# Ask: "What topics should I tag it with?"
-.\\run.bat notebook_manager.py add \
-  --url "https://notebooklm.google.com/notebook/..." \
-  --name "User provided name" \
-  --description "User provided description" \
-  --topics "user,provided,topics"
+    NeedSetup --> DoSetup: Step 2
+    DoSetup --> VisibleBrowser: auth_manager.py setup
+    VisibleBrowser --> WaitLogin: User logs in
+    WaitLogin --> Authenticated
+
+    Authenticated --> AddNotebook: Step 3
+    AddNotebook --> DiscoverContent: ask_question.py overview query
+    DiscoverContent --> RegisterNB: notebook_manager.py add
+    RegisterNB --> [*]: Ready to query
+
+    note right of VisibleBrowser
+        Browser MUST be visible
+    end note
+
+    note right of AddNotebook
+        ASK user for metadata
+        or use smart discovery
+    end note
 ```
 
-**Critical Notes:**
-- Virtual environment created by running install.py once
-- Browser MUST be visible for authentication
-- ALWAYS discover content via query OR ask user for notebook metadata
+---
 
-## Pattern 2: Adding Notebooks (Smart Discovery!)
+## Pattern 2: Adding Notebooks
 
-**When user shares a NotebookLM URL:**
+```mermaid
+stateDiagram-v2
+    [*] --> UserSharesURL
 
-**OPTION A: Smart Discovery (Recommended)**
-```bash
-# 1. Query the notebook to discover its content
-.\\run.bat ask_question.py \
-  --question "What is the content of this notebook? What topics are covered? Provide a complete overview briefly and concisely" \
-  --notebook-url "[URL]"
+    UserSharesURL --> chk1
+    state chk1 <<choice>>
+    chk1 --> SmartDiscovery: Option A Recommended
+    chk1 --> AskUser: Option B Fallback
 
-# 2. Use discovered info to add it
-.\\run.bat notebook_manager.py add \
-  --url "[URL]" \
-  --name "[Based on content]" \
-  --description "[From discovery]" \
-  --topics "[Extracted topics]"
+    state SmartDiscovery {
+        [*] --> QueryNB: ask_question.py overview
+        QueryNB --> ExtractInfo: Parse name, desc, topics
+        ExtractInfo --> AddWithInfo: notebook_manager.py add
+        AddWithInfo --> [*]
+    }
+
+    state AskUser {
+        [*] --> AskMeta: Ask user for metadata
+        AskMeta --> AddManual: notebook_manager.py add
+        AddManual --> [*]
+    }
+
+    SmartDiscovery --> [*]: Notebook registered
+    AskUser --> [*]: Notebook registered
+
+    note right of SmartDiscovery
+        NEVER guess content
+        NEVER use generic descriptions
+    end note
 ```
 
-**OPTION B: Ask User (Fallback)**
-```bash
-# If discovery fails, ask user:
-"What does this notebook contain?"
-"What topics does it cover?"
+---
 
-# Then add with user-provided info:
-.\\run.bat notebook_manager.py add \
-  --url "[URL]" \
-  --name "[User's answer]" \
-  --description "[User's description]" \
-  --topics "[User's topics]"
+## Pattern 3: Daily Research
+
+```mermaid
+stateDiagram-v2
+    [*] --> CheckLib: notebook_manager.py list
+
+    CheckLib --> SelectNB: Pick relevant notebook
+    SelectNB --> AskDetailed: ask_question.py --question
+    AskDetailed --> GotAnswer
+
+    GotAnswer --> chk1
+    state chk1 <<choice>>
+    chk1 --> FollowUp: Needs more detail
+    chk1 --> [*]: Complete
+
+    FollowUp --> AskDetailed: Follow-up with context
 ```
 
-**NEVER:**
-- Guess what's in a notebook
-- Use generic descriptions
-- Skip discovering content
+---
 
-## Pattern 3: Daily Research Workflow
+## Pattern 4: Follow-Up Questions
 
-```bash
-# Check library
-.\\run.bat notebook_manager.py list
+```mermaid
+stateDiagram-v2
+    [*] --> AskInitial: ask_question.py
 
-# Research with comprehensive questions
-.\\run.bat ask_question.py \
-  --question "Detailed question with all context" \
-  --notebook-id notebook-id
+    AskInitial --> CheckResponse
 
-# Follow-up when you see "Is that ALL you need to know?"
-.\\run.bat ask_question.py \
-  --question "Follow-up question with previous context"
+    CheckResponse --> chk1
+    state chk1 <<choice>>
+    chk1 --> AnalyzeGaps: "Is that ALL you need?"
+    chk1 --> Synthesize: Answer complete
+
+    AnalyzeGaps --> chk2
+    state chk2 <<choice>>
+    chk2 --> AskFollowUp: Gaps found
+    chk2 --> Synthesize: No gaps
+
+    AskFollowUp --> CheckResponse: Specific follow-up
+    Synthesize --> RespondUser: Combine all answers
+    RespondUser --> [*]
+
+    note right of AnalyzeGaps
+        STOP before responding to user
+        ANALYZE answer completeness
+    end note
 ```
 
-## Pattern 4: Follow-Up Questions (CRITICAL!)
-
-When NotebookLM responds with "EXTREMELY IMPORTANT: Is that ALL you need to know?":
-
-```python
-# 1. STOP - Don't respond to user yet
-# 2. ANALYZE - Is answer complete?
-# 3. If gaps exist, ask follow-up:
-.\\run.bat ask_question.py \
-  --question "Specific follow-up with context from previous answer"
-
-# 4. Repeat until complete
-# 5. Only then synthesize and respond to user
-```
+---
 
 ## Pattern 5: Multi-Notebook Research
 
-```python
-# Query different notebooks for comparison
-.\\run.bat notebook_manager.py activate --id notebook-1
-.\\run.bat ask_question.py --question "Question"
-
-.\\run.bat notebook_manager.py activate --id notebook-2
-.\\run.bat ask_question.py --question "Same question"
-
-# Compare and synthesize answers
+```mermaid
+stateDiagram-v2
+    [*] --> ActivateNB1: notebook_manager.py activate --id nb1
+    ActivateNB1 --> QueryNB1: ask_question.py --question
+    QueryNB1 --> ActivateNB2: notebook_manager.py activate --id nb2
+    ActivateNB2 --> QueryNB2: ask_question.py same question
+    QueryNB2 --> Compare: Synthesize answers
+    Compare --> [*]
 ```
+
+---
 
 ## Pattern 6: Error Recovery
 
-```bash
-# If authentication fails
-.\\run.bat auth_manager.py status
-.\\run.bat auth_manager.py reauth  # Browser visible!
+```mermaid
+stateDiagram-v2
+    [*] --> ErrorType
 
-# If browser crashes
-.\\run.bat cleanup_manager.py --preserve-library
-.\\run.bat auth_manager.py setup  # Browser visible!
+    state ErrorType <<choice>>
+    ErrorType --> AuthFail: Auth error
+    ErrorType --> BrowserCrash: Browser error
+    ErrorType --> RateLimit: Rate limited
 
-# If rate limited
-# Wait or switch accounts
-.\\run.bat auth_manager.py reauth  # Login with different account
+    AuthFail --> CheckStatus: auth_manager.py status
+    CheckStatus --> DoReauth: auth_manager.py reauth
+    DoReauth --> [*]: Resolved
+
+    BrowserCrash --> Cleanup: cleanup --preserve-library
+    Cleanup --> Reauth: auth_manager.py setup
+    Reauth --> [*]: Resolved
+
+    RateLimit --> chk1
+    state chk1 <<choice>>
+    chk1 --> WaitHour: Wait
+    chk1 --> SwitchAcct: auth_manager.py reauth
+    WaitHour --> [*]
+    SwitchAcct --> [*]
 ```
+
+---
 
 ## Pattern 7: Batch Processing
 
-```bash
-#!/bin/bash
-NOTEBOOK_ID="notebook-id"
-QUESTIONS=(
-    "First comprehensive question"
-    "Second comprehensive question"
-    "Third comprehensive question"
-)
+```mermaid
+stateDiagram-v2
+    [*] --> LoadQuestions: Prepare question list
 
-for question in "${QUESTIONS[@]}"; do
-    echo "Asking: $question"
-    .\\run.bat ask_question.py \
-        --question "$question" \
-        --notebook-id "$NOTEBOOK_ID"
-    sleep 2  # Avoid rate limits
-done
+    LoadQuestions --> NextQ: Pick next question
+    NextQ --> AskQ: ask_question.py --question Q --notebook-id ID
+    AskQ --> WaitDelay: sleep 2s (rate limit)
+
+    WaitDelay --> chk1
+    state chk1 <<choice>>
+    chk1 --> NextQ: More questions
+    chk1 --> [*]: All done
 ```
 
-## Pattern 8: Automated Research Script
+---
 
-```python
-#!/usr/bin/env python
-import subprocess
+## Pattern 8: Notebook Organization
 
-def research_topic(topic, notebook_id):
-    # Comprehensive question
-    question = f"""
-    Explain {topic} in detail:
-    1. Core concepts
-    2. Implementation details
-    3. Best practices
-    4. Common pitfalls
-    5. Examples
-    """
+```mermaid
+stateDiagram-v2
+    [*] --> OrganizeByDomain
 
-    result = subprocess.run([
-        "python", "scripts/run.py", "ask_question.py",
-        "--question", question,
-        "--notebook-id", notebook_id
-    ], capture_output=True, text=True)
+    state OrganizeByDomain {
+        [*] --> Backend: api, rest, backend
+        [*] --> Frontend: react, css, frontend
+        [*] --> Infra: database, devops
+    }
 
-    return result.stdout
+    OrganizeByDomain --> SearchByDomain: notebook_manager.py search --query DOMAIN
+    SearchByDomain --> [*]
+
+    note right of OrganizeByDomain
+        Use consistent topic tags
+        ALWAYS ask user for descriptions
+    end note
 ```
 
-## Pattern 9: Notebook Organization
+---
 
-```python
-# Organize by domain - with proper metadata
-# ALWAYS ask user for descriptions!
+## Pattern 9: Library Management
 
-# Backend notebooks
-add_notebook("Backend API", "Complete API documentation", "api,rest,backend")
-add_notebook("Database", "Schema and queries", "database,sql,backend")
+```mermaid
+stateDiagram-v2
+    [*] --> Register: notebook_manager.py add (once per notebook)
 
-# Frontend notebooks
-add_notebook("React Docs", "React framework documentation", "react,frontend")
-add_notebook("CSS Framework", "Styling documentation", "css,styling,frontend")
+    Register --> ListIDs: notebook_manager.py list
+    ListIDs --> SetActive: activate --id project-beta
 
-# Search by domain
-.\\run.bat notebook_manager.py search --query "backend"
-.\\run.bat notebook_manager.py search --query "frontend"
+    SetActive --> QueryDefault: ask_question.py uses active by default
+    QueryDefault --> QueryOverride: --notebook-id overrides active
+    QueryOverride --> [*]
+
+    note right of SetActive
+        Persistent across sessions
+    end note
 ```
 
-## Pattern 10: Integration with Development
+---
 
-```python
-# Query documentation during development
-def check_api_usage(api_endpoint):
-    result = subprocess.run([
-        "python", "scripts/run.py", "ask_question.py",
-        "--question", f"Parameters and response format for {api_endpoint}",
-        "--notebook-id", "api-docs"
-    ], capture_output=True, text=True)
+## Copilot Workflow: User Sends URL
 
-    # If follow-up needed
-    if "Is that ALL you need" in result.stdout:
-        # Ask for examples
-        follow_up = subprocess.run([
-            "python", "scripts/run.py", "ask_question.py",
-            "--question", f"Show code examples for {api_endpoint}",
-            "--notebook-id", "api-docs"
-        ], capture_output=True, text=True)
+```mermaid
+stateDiagram-v2
+    [*] --> DetectURL: notebooklm.google.com in message
 
-    return combine_answers(result.stdout, follow_up.stdout)
+    DetectURL --> CheckLibrary: notebook_manager.py list
+    CheckLibrary --> chk1
+    state chk1 <<choice>>
+    chk1 --> QueryExisting: URL already in library
+    chk1 --> AskUserMeta: URL not in library
+
+    AskUserMeta --> GetName: What to call this notebook?
+    GetName --> GetDesc: What does it contain?
+    GetDesc --> GetTopics: What topics?
+    GetTopics --> AddNB: notebook_manager.py add
+    AddNB --> QueryExisting
+
+    QueryExisting --> Answer: ask_question.py
+    Answer --> [*]
 ```
 
-## Pattern 11: Managing Multiple Notebooks (Library Strategy)
+---
 
-**1. Register Notebooks Once**
-```bat
-.\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/AAA" --name "Project Alpha" --description "Frontend docs" --topics "alpha,frontend"
-.\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/BBB" --name "Project Beta" --description "Backend API" --topics "beta,backend"
+## Copilot Workflow: Research Task
+
+```mermaid
+stateDiagram-v2
+    [*] --> UnderstandTask
+
+    UnderstandTask --> FormulateQs: Craft comprehensive questions
+    FormulateQs --> AskQ: ask_question.py --question Q
+
+    AskQ --> CheckAnswer
+    state CheckAnswer <<choice>>
+    CheckAnswer --> AskFollowUp: "Is that ALL you need?"
+    CheckAnswer --> NextQ: Answer complete
+
+    AskFollowUp --> AskQ: Specific follow-up
+    NextQ --> chk1
+    state chk1 <<choice>>
+    chk1 --> FormulateQs: More questions
+    chk1 --> Synthesize: All answered
+
+    Synthesize --> Implement: Build from answers
+    Implement --> [*]
 ```
-
-**2. List to View IDs**
-```bat
-.\run.bat notebook_manager.py list
-# Output:
-#   Project Alpha (project-alpha)
-#   Project Beta (project-beta)
-```
-
-**3. Switch Context (Persistent)**
-```bat
-.\run.bat notebook_manager.py activate --id project-beta
-# Future calls to ask_question.py will use this notebook by default
-```
-
-**4. Query Specific Notebooks (Override Active)**
-```bat
-# Query Alpha without changing active notebook
-.\run.bat ask_question.py --question "..." --notebook-id project-alpha
-
-# Query Beta explicitly
-.\run.bat ask_question.py --question "..." --notebook-id project-beta
-```
-
-## Best Practices
-
-### 1. Question Formulation
-- Be specific and comprehensive
-- Include all context in each question
-- Request structured responses
-- Ask for examples when needed
-
-### 2. Notebook Management
-- **ALWAYS ask user for metadata**
-- Use descriptive names
-- Add comprehensive topics
-- Keep URLs current
-
-### 3. Performance
-- Batch related questions
-- Use parallel processing for different notebooks
-- Monitor rate limits (50/day)
-- Switch accounts if needed
-
-### 4. Error Handling
-- Always use run.py to prevent venv issues
-- Check auth before operations
-- Implement retry logic
-- Have fallback notebooks ready
-
-### 5. Security
-- Use dedicated Google account
-- Never commit data/ directory
-- Regularly refresh auth
-- Track all access
-
-## Common Workflows for Claude
-
-### Workflow 1: User Sends NotebookLM URL
-
-```python
-# 1. Detect URL in message
-if "notebooklm.google.com" in user_message:
-    url = extract_url(user_message)
-
-    # 2. Check if in library
-    notebooks = run("notebook_manager.py list")
-
-    if url not in notebooks:
-        # 3. ASK USER FOR METADATA (CRITICAL!)
-        name = ask_user("What should I call this notebook?")
-        description = ask_user("What does this notebook contain?")
-        topics = ask_user("What topics does it cover?")
-
-        # 4. Add with user-provided info
-        run(f"notebook_manager.py add --url {url} --name '{name}' --description '{description}' --topics '{topics}'")
-
-    # 5. Use the notebook
-    answer = run(f"ask_question.py --question '{user_question}'")
-```
-
-### Workflow 2: Research Task
-
-```python
-# 1. Understand task
-task = "Implement feature X"
-
-# 2. Formulate comprehensive questions
-questions = [
-    "Complete implementation guide for X",
-    "Error handling for X",
-    "Performance considerations for X"
-]
-
-# 3. Query with follow-ups
-for q in questions:
-    answer = run(f"ask_question.py --question '{q}'")
-
-    # Check if follow-up needed
-    if "Is that ALL you need" in answer:
-        # Ask more specific question
-        follow_up = run(f"ask_question.py --question 'Specific detail about {q}'")
-
-# 4. Synthesize and implement
-```
-
-## Tips and Tricks
-
-1. **Always use run.py** - Prevents all venv issues
-2. **Ask for metadata** - Never guess notebook contents
-3. **Use verbose questions** - Include all context
-4. **Follow up automatically** - When you see the prompt
-5. **Monitor rate limits** - 50 queries per day
-6. **Batch operations** - Group related queries
-7. **Export important answers** - Save locally
-8. **Version control notebooks** - Track changes
 9. **Test auth regularly** - Before important tasks
 10. **Document everything** - Keep notes on notebooks
 

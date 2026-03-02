@@ -1,309 +1,185 @@
-﻿# NotebookLM Skill Troubleshooting Guide
+﻿# NotebookLM Skill Troubleshooting
 
-## Quick Fix Table
+## Error Decision Tree
 
-| Error | Solution |
-|-------|----------|
-| ModuleNotFoundError | Use `.\\run.bat [script].py` |
-| Authentication failed | Browser must be visible for setup |
-| Browser crash | `.\\run.bat cleanup_manager.py --preserve-library` |
-| Rate limit hit | Wait 1 hour or switch accounts |
-| Notebook not found | `.\\run.bat notebook_manager.py list` |
-| Script not working | Always use run.bat wrapper |
+```mermaid
+stateDiagram-v2
+    [*] --> ErrorOccurs
 
-## Critical: Always Use run.bat
+    ErrorOccurs --> Identify
+    state Identify <<choice>>
+    Identify --> ModuleErr: ModuleNotFoundError
+    Identify --> AuthErr: Auth failed
+    Identify --> BrowserErr: Browser crash
+    Identify --> RateErr: Rate limit
+    Identify --> NBNotFound: Notebook not found
+    Identify --> ScriptErr: Script not working
 
-Most issues are solved by using the run.py wrapper:
+    ModuleErr --> UseRunBat: Use .\run.bat wrapper
+    UseRunBat --> [*]: Resolved
+
+    AuthErr --> AuthFix
+    BrowserErr --> BrowserFix
+    RateErr --> RateFix
+    NBNotFound --> NBFix
+    ScriptErr --> UseRunBat
+
+    AuthFix --> [*]: See Auth Flow below
+    BrowserFix --> [*]: See Browser Flow below
+    RateFix --> [*]: See Rate Flow below
+    NBFix --> [*]: See Notebook Flow below
+```
+
+---
+
+## Auth Errors
+
+```mermaid
+stateDiagram-v2
+    [*] --> AuthError
+
+    AuthError --> chk1
+    state chk1 <<choice>>
+    chk1 --> NotAuth: Not authenticated error
+    chk1 --> ExpiresOften: Auth expires frequently
+    chk1 --> Blocked: Google blocks login
+
+    NotAuth --> CheckStatus: auth_manager.py status
+    CheckStatus --> chk2
+    state chk2 <<choice>>
+    chk2 --> DoSetup: Never authenticated
+    chk2 --> DoReauth: Session expired
+
+    DoSetup --> [*]: setup (VISIBLE browser!)
+    DoReauth --> [*]: reauth
+
+    ExpiresOften --> CleanOld: cleanup --preserve-library
+    CleanOld --> FreshSetup: auth_manager.py setup --timeout 15
+    FreshSetup --> [*]
+
+    Blocked --> DedicatedAcct: Use dedicated Google account
+    DedicatedAcct --> VisibleSetup: auth_manager.py setup
+    VisibleSetup --> [*]
+
+    note right of DoSetup
+        Browser MUST be visible
+        User logs in manually
+    end note
+```
 
 ```bash
-# CORRECT - Always:
-.\\run.bat auth_manager.py status
-.\\run.bat ask_question.py --question "..."
-
-# WRONG - Never:
-python scripts/auth_manager.py status  # ModuleNotFoundError!
+.\run.bat auth_manager.py status
+.\run.bat auth_manager.py setup
+.\run.bat auth_manager.py reauth
 ```
 
-## Common Issues and Solutions
+---
 
-### Authentication Issues
+## Browser Errors
 
-#### Not authenticated error
-```
-Error: Not authenticated. Please run auth setup first.
-```
+```mermaid
+stateDiagram-v2
+    [*] --> BrowserError
 
-**Solution:**
-```bash
-# Check status
-.\\run.bat auth_manager.py status
+    BrowserError --> chk1
+    state chk1 <<choice>>
+    chk1 --> CrashHang: Crash or hang
+    chk1 --> NotFound: Browser not found
 
-# Setup authentication (browser MUST be visible!)
-.\\run.bat auth_manager.py setup
-# User must manually log in to Google
+    CrashHang --> KillProcs: Kill chrome processes
+    KillProcs --> CleanState: cleanup --confirm --preserve-library
+    CleanState --> DoReauth: auth_manager.py reauth
+    DoReauth --> [*]: Resolved
 
-# If setup fails, try re-authentication
-.\\run.bat auth_manager.py reauth
-```
-
-#### Authentication expires frequently
-**Solution:**
-```bash
-# Clear old authentication
-.\\run.bat cleanup_manager.py --preserve-library
-
-# Fresh authentication setup
-.\\run.bat auth_manager.py setup --timeout 15
-
-# Use persistent browser profile
-export PERSIST_AUTH=true
+    NotFound --> AutoInstall: run.bat auto-installs
+    AutoInstall --> chk2
+    state chk2 <<choice>>
+    chk2 --> [*]: Resolved
+    chk2 --> ManualInstall: patchright install chromium
+    ManualInstall --> [*]: Resolved
 ```
 
-#### Google blocks automated login
-**Solution:**
-1. Use dedicated Google account for automation
-2. Enable "Less secure app access" if available
-3. ALWAYS use visible browser:
-```bash
-.\\run.bat auth_manager.py setup
-# Browser MUST be visible - user logs in manually
-# NO headless parameter exists - use --show-browser for debugging
+---
+
+## Rate Limiting
+
+```mermaid
+stateDiagram-v2
+    [*] --> RateLimited: 50 queries/day exceeded
+
+    RateLimited --> chk1
+    state chk1 <<choice>>
+    chk1 --> WaitReset: Option 1: Wait
+    chk1 --> SwitchAcct: Option 2: Switch account
+
+    WaitReset --> [*]: Resets at midnight PST
+
+    SwitchAcct --> ClearAuth: auth_manager.py clear
+    ClearAuth --> NewSetup: auth_manager.py setup
+    NewSetup --> [*]: New account active
 ```
 
-### Browser Issues
+---
 
-#### Browser crashes or hangs
-```
-TimeoutError: Waiting for selector failed
-```
+## Notebook Access Errors
 
-**Solution:**
-```bash
-# Kill hanging processes
-pkill -f chromium
-pkill -f chrome
+```mermaid
+stateDiagram-v2
+    [*] --> NBError
 
-# Clean browser state
-.\\run.bat cleanup_manager.py --confirm --preserve-library
+    NBError --> chk1
+    state chk1 <<choice>>
+    chk1 --> NotFoundNB: Notebook not found
+    chk1 --> AccessDenied: Access denied
+    chk1 --> WrongNB: Wrong notebook active
 
-# Re-authenticate
-.\\run.bat auth_manager.py reauth
-```
+    NotFoundNB --> ListNBs: notebook_manager.py list
+    ListNBs --> chk2
+    state chk2 <<choice>>
+    chk2 --> ActivateIt: Found in list
+    chk2 --> AddNew: Not in list
+    ActivateIt --> [*]: activate --id ID
+    AddNew --> [*]: add --url URL --name NAME
 
-#### Browser not found error
-**Solution:**
-```bash
-# Install Chromium via run.py (automatic)
-.\\run.bat auth_manager.py status
-# run.py will install Chromium automatically
+    AccessDenied --> CheckSharing: Still shared publicly?
+    CheckSharing --> chk3
+    state chk3 <<choice>>
+    chk3 --> ReaddNB: URL changed
+    chk3 --> FixAcct: Wrong Google account
+    ReaddNB --> [*]
+    FixAcct --> [*]: setup with correct account
 
-# Or manual install if needed
-cd ~/.claude/skills/notebooklm
-source .venv/bin/activate
-python -m patchright install chromium
-```
-
-### Rate Limiting
-
-#### Rate limit exceeded (50 queries/day)
-**Solutions:**
-
-**Option 1: Wait**
-```bash
-# Check when limit resets (usually midnight PST)
-date -d "tomorrow 00:00 PST"
+    WrongNB --> ListActive: notebook_manager.py list
+    ListActive --> ActivateCorrect: activate --id correct-id
+    ActivateCorrect --> [*]
 ```
 
-**Option 2: Switch accounts**
-```bash
-# Clear current auth
-.\\run.bat auth_manager.py clear
+---
 
-# Login with different account
-.\\run.bat auth_manager.py setup
+## Recovery Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> Diagnose: Multiple things broken
+
+    Diagnose --> BackupLib: Backup library.json
+    BackupLib --> CleanAll: cleanup_manager.py --confirm --force
+    CleanAll --> RemoveVenv: Remove .venv
+    RemoveVenv --> Reinstall: run.bat auth_manager.py setup
+    Reinstall --> RestoreLib: Restore library backup
+    RestoreLib --> Verify: Test all operations
+
+    Verify --> chk1
+    state chk1 <<choice>>
+    chk1 --> [*]: All working
+    chk1 --> Diagnose: Still broken
 ```
-
-**Option 3: Rotate accounts**
-```python
-# Use multiple accounts
-accounts = ["account1", "account2"]
-for account in accounts:
-    # Switch account on rate limit
-    subprocess.run(["python", "scripts/run.py", "auth_manager.py", "reauth"])
-```
-
-### Notebook Access Issues
-
-#### Notebook not found
-**Solution:**
-```bash
-# List all notebooks
-.\\run.bat notebook_manager.py list
-
-# Search for notebook
-.\\run.bat notebook_manager.py search --query "keyword"
-
-# Add notebook if missing
-.\\run.bat notebook_manager.py add \
-  --url "https://notebooklm.google.com/..." \
-  --name "Name" \
-  --topics "topics"
-```
-
-#### Access denied to notebook
-**Solution:**
-1. Check if notebook is still shared publicly
-2. Re-add notebook with updated URL
-3. Verify correct Google account is used
-
-#### Wrong notebook being used
-**Solution:**
-```bash
-# Check active notebook
-.\\run.bat notebook_manager.py list | grep "active"
-
-# Activate correct notebook
-.\\run.bat notebook_manager.py activate --id correct-id
-```
-
-### Virtual Environment Issues
-
-#### ModuleNotFoundError
-```
-ModuleNotFoundError: No module named 'patchright'
-```
-
-**Solution:**
-```bash
-# ALWAYS use run.bat - it invokes .venv Python directly!
-.\\run.bat [any_script].py
-
-# run.bat will:
-# 1. Create .venv if missing
-# 2. Install dependencies
-# 3. Run the script
-```
-
-#### Wrong Python version
-**Solution:**
-```bash
-# Check Python version (needs 3.8+)
-python --version
-
-# If wrong version, specify correct Python
-.\\run.bat auth_manager.py status
-```
-
-### Network Issues
-
-#### Connection timeouts
-**Solution:**
-```bash
-# Increase timeout
-export TIMEOUT_SECONDS=60
-
-# Check connectivity
-ping notebooklm.google.com
-
-# Use proxy if needed
-export HTTP_PROXY=http://proxy:port
-export HTTPS_PROXY=http://proxy:port
-```
-
-### Data Issues
-
-#### Corrupted notebook library
-```
-JSON decode error when listing notebooks
-```
-
-**Solution:**
-```bash
-# Backup current library
-cp ~/.claude/skills/notebooklm/data/library.json library.backup.json
-
-# Reset library
-rm ~/.claude/skills/notebooklm/data/library.json
-
-# Re-add notebooks
-.\\run.bat notebook_manager.py add --url ... --name ...
-```
-
-#### Disk space full
-**Solution:**
-```bash
-# Check disk usage
-df -h ~/.claude/skills/notebooklm/data/
-
-# Clean up
-.\\run.bat cleanup_manager.py --confirm --preserve-library
-```
-
-## Debugging Techniques
-
-### Enable verbose logging
-```bash
-export DEBUG=true
-export LOG_LEVEL=DEBUG
-.\\run.bat ask_question.py --question "Test" --show-browser
-```
-
-### Test individual components
-```bash
-# Test authentication
-.\\run.bat auth_manager.py status
-
-# Test notebook access
-.\\run.bat notebook_manager.py list
-
-# Test browser launch
-.\\run.bat ask_question.py --question "test" --show-browser
-```
-
-### Save screenshots on error
-Add to scripts for debugging:
-```python
-try:
-    # Your code
-except Exception as e:
-    page.screenshot(path=f"error_{timestamp}.png")
-    raise e
-```
-
-## Recovery Procedures
-
-### Complete reset
-```bash
-#!/bin/bash
-# Kill processes
-pkill -f chromium
-
-# Backup library if exists
-if [ -f ~/.claude/skills/notebooklm/data/library.json ]; then
-    cp ~/.claude/skills/notebooklm/data/library.json ~/library.backup.json
-fi
-
-# Clean everything
-cd ~/.claude/skills/notebooklm
-.\\run.bat cleanup_manager.py --confirm --force
-
-# Remove venv
-rm -rf .venv
-
-# Reinstall (run.py will handle this)
-.\\run.bat auth_manager.py setup
-
-# Restore library if backup exists
-if [ -f ~/library.backup.json ]; then
-    mkdir -p ~/.claude/skills/notebooklm/data/
-    cp ~/library.backup.json ~/.claude/skills/notebooklm/data/library.json
-fi
 ```
 
 ### Partial recovery (keep data)
 ```bash
 # Keep auth and library, fix execution
-cd ~/.claude/skills/notebooklm
+cd <skill-dir>
 rm -rf .venv
 
 # run.py will recreate venv automatically
@@ -350,7 +226,7 @@ rm -rf .venv
 ```bash
 # System info
 python --version
-cd ~/.claude/skills/notebooklm
+cd <skill-dir>
 ls -la
 
 # Skill status
@@ -358,13 +234,13 @@ ls -la
 .\\run.bat notebook_manager.py list | head -5
 
 # Check data directory
-ls -la ~/.claude/skills/notebooklm/data/
+ls -la <skill-dir>/data/
 ```
 
 ### Common questions
 
-**Q: Why doesn't this work in Claude web UI?**
-A: Web UI has no network access. Use local Claude Code.
+**Q: Why doesn't this work without network access?**
+A: This skill requires a local environment with browser access. Use GitHub Copilot in VS Code with the skill installed locally.
 
 **Q: Can I use multiple Google accounts?**
 A: Yes, use `run.py auth_manager.py reauth` to switch.
