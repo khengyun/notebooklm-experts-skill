@@ -37,6 +37,84 @@ FOLLOW_UP_REMINDER = (
 )
 
 
+def _extract_notebook_title(raw_title: str) -> str:
+    """Normalize NotebookLM browser title to the notebook display name."""
+    if not raw_title:
+        return ""
+    if " - NotebookLM" in raw_title:
+        return raw_title.rsplit(" - NotebookLM", 1)[0].strip()
+    if raw_title == "NotebookLM":
+        return ""
+    return raw_title.strip()
+
+
+def refresh_notebook_name_only(notebook_url: str, headless: bool = True, profile_id: str = None) -> bool:
+    """Open a notebook and refresh its stored name without asking a question."""
+    auth = AuthManager(profile_id=profile_id)
+
+    if not auth.is_authenticated():
+        print("Warning: Not authenticated. Run: auth_manager.py setup")
+        return False
+
+    playwright = None
+    context = None
+
+    try:
+        playwright = sync_playwright().start()
+        context = BrowserFactory.launch_persistent_context(
+            playwright,
+            headless=headless,
+            user_data_dir=str(auth.browser_profile_dir),
+            state_file=auth.state_file,
+        )
+
+        page = context.new_page()
+        print("  Opening notebook for name refresh...")
+        page.goto(notebook_url, wait_until="domcontentloaded")
+        page.wait_for_url(re.compile(r"^https://notebooklm\.google\.com/"), timeout=10000)
+
+        detected_title = ""
+        deadline = time.time() + 10
+        while time.time() < deadline and not detected_title:
+            detected_title = _extract_notebook_title(page.title())
+            if detected_title:
+                break
+            page.wait_for_timeout(500)
+
+        if not detected_title:
+            print("  Could not detect notebook title from page")
+            return False
+
+        library = NotebookLibrary(profile_id=profile_id)
+        changed = library.refresh_notebook_name(
+            notebook_url=notebook_url,
+            detected_title=detected_title,
+        )
+
+        if changed:
+            print("  Notebook name refreshed")
+        else:
+            print("  Notebook name already up to date")
+        return True
+
+    except Exception as e:
+        print(f"  Error refreshing notebook name: {e}")
+        return False
+
+    finally:
+        if context:
+            try:
+                context.close()
+            except:
+                pass
+
+        if playwright:
+            try:
+                playwright.stop()
+            except:
+                pass
+
+
 def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, profile_id: str = None) -> str:
     """
     Ask a question to NotebookLM
@@ -83,6 +161,19 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
 
         # Wait for NotebookLM
         page.wait_for_url(re.compile(r"^https://notebooklm\.google\.com/"), timeout=10000)
+
+        # Refresh notebook name in library if page title changed.
+        try:
+            detected_title = _extract_notebook_title(page.title())
+
+            if detected_title:
+                library = NotebookLibrary(profile_id=profile_id)
+                library.refresh_notebook_name(
+                    notebook_url=notebook_url,
+                    detected_title=detected_title,
+                )
+        except Exception as refresh_err:
+            print(f"  Warning: Could not refresh notebook name: {refresh_err}")
 
         # Wait for query input (MCP approach)
         print("  Waiting for query input...")
@@ -195,11 +286,16 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
 def main():
     parser = argparse.ArgumentParser(description='Ask NotebookLM a question')
 
-    parser.add_argument('--question', required=True, help='Question to ask')
+    parser.add_argument('--question', help='Question to ask')
     parser.add_argument('--notebook-url', help='NotebookLM notebook URL')
     parser.add_argument('--notebook-id', help='Notebook ID from library')
     parser.add_argument('--profile', help='Profile to use (default: active profile)')
     parser.add_argument('--show-browser', action='store_true', help='Show browser')
+    parser.add_argument(
+        '--refresh-name-only',
+        action='store_true',
+        help='Open notebook and refresh stored notebook name without sending a question',
+    )
 
     args = parser.parse_args()
 
@@ -238,6 +334,18 @@ def main():
                 print("No notebooks in library. Add one first:")
                 print("python scripts/run.py notebook_manager.py add --url URL --name NAME --description DESC --topics TOPICS")
             return 1
+
+    if args.refresh_name_only:
+        ok = refresh_notebook_name_only(
+            notebook_url=notebook_url,
+            headless=not args.show_browser,
+            profile_id=profile_id,
+        )
+        return 0 if ok else 1
+
+    if not args.question:
+        print("Error: --question is required unless --refresh-name-only is used")
+        return 1
 
     # Ask the question
     answer = ask_notebooklm(

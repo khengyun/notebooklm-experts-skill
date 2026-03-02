@@ -417,6 +417,53 @@ class NotebookLibrary:
             return self.notebooks.get(self.active_notebook_id)
         return None
 
+    def resolve_notebook_id(
+        self,
+        notebook_id: Optional[str] = None,
+        notebook_url: Optional[str] = None,
+    ) -> Optional[str]:
+        """Resolve a notebook ID from an explicit ID or URL."""
+        if notebook_id and notebook_id in self.notebooks:
+            return notebook_id
+
+        if notebook_url:
+            # Fast path: NotebookLM URL usually embeds the notebook UUID.
+            extracted = _extract_id_from_url(notebook_url)
+            if extracted and extracted in self.notebooks:
+                return extracted
+
+            # Fallback for non-standard URLs or imported entries.
+            for candidate_id, notebook in self.notebooks.items():
+                if notebook.get('url') == notebook_url:
+                    return candidate_id
+
+        return None
+
+    def refresh_notebook_name(
+        self,
+        notebook_url: str,
+        detected_title: Optional[str],
+    ) -> bool:
+        """Refresh stored notebook name from the current page title."""
+        if not detected_title:
+            return False
+
+        notebook_id = self.resolve_notebook_id(notebook_url=notebook_url)
+        if not notebook_id:
+            return False
+
+        notebook = self.notebooks[notebook_id]
+        new_name = detected_title.strip()
+        if not new_name or new_name == notebook.get('name'):
+            return False
+
+        old_name = notebook.get('name', '')
+        notebook['name'] = new_name
+        notebook['updated_at'] = datetime.now().isoformat()
+        self._save_library()
+        print(f"  Refreshed notebook name: '{old_name}' -> '{new_name}'")
+        return True
+
     def increment_use_count(self, notebook_id: str) -> Dict[str, Any]:
         """
         Increment usage counter for a notebook
