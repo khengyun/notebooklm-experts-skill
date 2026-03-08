@@ -57,7 +57,10 @@ def main():
 
     print("\nSetup complete!")
     print("Authenticate before first use:")
-    print("  python scripts/run.py auth_manager.py setup")
+    if os.name == "nt":
+        print("  .\\run.bat auth_manager.py setup")
+    else:
+        print("  ./run.sh auth_manager.py setup")
 
 
 if __name__ == "__main__":

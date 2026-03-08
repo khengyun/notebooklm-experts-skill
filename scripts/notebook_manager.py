@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-Notebook Library Management for NotebookLM
-Manages a library of NotebookLM notebooks with metadata
-Based on the MCP server implementation
-"""
+"""Notebook library management for NotebookLM skill workflows."""
 
 import csv
 import io
@@ -17,6 +13,16 @@ from urllib.parse import unquote
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+
+from runtime_logging import (
+    configure_runtime,
+    debug_kv,
+    expect,
+    extract_runtime_flags,
+    log_exception,
+    runtime_options_help,
+    step,
+)
 
 
 def _extract_id_from_url(url: str) -> Optional[str]:
@@ -39,6 +45,7 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
     from auth_manager import AuthManager
     from config import QUERY_INPUT_SELECTORS
 
+    step("Fetch notebook metadata from live NotebookLM page")
     auth = AuthManager(profile_id=profile_id)
 
     if not auth.is_authenticated():
@@ -61,6 +68,7 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
         page.set_viewport_size({"width": 1440, "height": 900})
 
         print("  Fetching notebook metadata...")
+        expect("Notebook page should load and reveal source panel controls")
         page.goto(url, wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
 
@@ -150,7 +158,7 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
         return {'title': title, 'sources': sources}
 
     except Exception as e:
-        print(f"  Error fetching metadata: {e}")
+        log_exception("  Error fetching metadata", e)
         return {'title': None, 'sources': []}
 
     finally:
@@ -708,7 +716,11 @@ class NotebookLibrary:
 
 def main():
     """Command-line interface for notebook management"""
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("notebook_manager", **runtime_opts)
+
     parser = argparse.ArgumentParser(description='Manage NotebookLM library')
+    parser.epilog = runtime_options_help()
     parser.add_argument('--profile', help='Profile to use (default: active profile)')
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')
@@ -759,13 +771,15 @@ def main():
     add_source_parser.add_argument('--source-url', required=True, help='Web URL or YouTube URL to add')
     add_source_parser.add_argument('--no-headless', action='store_true', help='Show browser window')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Initialize library
     library = NotebookLibrary(profile_id=getattr(args, 'profile', None))
 
     # Execute command
     if args.command == 'add':
+        step("Add notebook to local library")
+        debug_kv("notebook.add", url=args.url, profile=getattr(args, 'profile', None), no_fetch=args.no_fetch)
         name = args.name
         description = args.description
         topics_str = args.topics
@@ -826,6 +840,7 @@ def main():
         print(json.dumps(notebook, indent=2))
 
     elif args.command == 'list':
+        step("List notebooks in local library")
         notebooks = library.list_notebooks()
         if notebooks:
             print("\nNotebook Library:")
@@ -839,6 +854,7 @@ def main():
             print("Library is empty. Add notebooks with: notebook_manager.py add")
 
     elif args.command == 'search':
+        step(f"Search notebooks for '{args.query}'")
         results = library.search_notebooks(args.query)
         if results:
             print(f"\nFound {len(results)} notebooks:")
@@ -849,14 +865,17 @@ def main():
             print(f"No notebooks found for: {args.query}")
 
     elif args.command == 'activate':
+        step(f"Activate notebook '{args.id}'")
         notebook = library.select_notebook(args.id)
         print(f"Now using: {notebook['name']}")
 
     elif args.command == 'remove':
+        step(f"Remove notebook '{args.id}'")
         if library.remove_notebook(args.id):
             print("Notebook removed from library")
 
     elif args.command == 'stats':
+        step("Read notebook library stats")
         stats = library.get_stats()
         print("\nLibrary Statistics:")
         print(f"  Total notebooks: {stats['total_notebooks']}")
@@ -869,6 +888,7 @@ def main():
         print(f"  Library path: {stats['library_path']}")
 
     elif args.command == 'export':
+        step("Export notebook library")
         dest = library.export_notebooks(
             format=args.format,
             output_path=getattr(args, 'output', None),
@@ -876,6 +896,7 @@ def main():
         print(f"Export saved to: {dest}")
 
     elif args.command == 'import':
+        step(f"Import notebook library from '{args.file}'")
         result = library.import_notebooks(
             file_path=args.file,
             strategy=args.strategy,
@@ -883,6 +904,8 @@ def main():
         print(json.dumps(result, indent=2))
 
     elif args.command == 'add-source':
+        step("Add a web source to a NotebookLM notebook")
+        expect("Notebook must be reachable and the add-source dialog must open")
         from browser_utils import add_source_web
         success = add_source_web(
             notebook_url=args.notebook_url,

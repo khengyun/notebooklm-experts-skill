@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-Browser Session Management for NotebookLM
-Individual browser session for persistent NotebookLM conversations
-Based on the original NotebookLM API implementation
-"""
+"""Low-level browser session helper for NotebookLM page interactions."""
 
 import time
 import sys
@@ -20,11 +16,7 @@ from browser_utils import StealthUtils
 
 class BrowserSession:
     """
-    Represents a single persistent browser session for NotebookLM
-
-    Each session gets its own Page (tab) within a shared BrowserContext,
-    allowing for contextual conversations where NotebookLM remembers
-    previous messages.
+    Represents a single browser tab within a shared NotebookLM context.
     """
 
     def __init__(self, session_id: str, context: BrowserContext, notebook_url: str):

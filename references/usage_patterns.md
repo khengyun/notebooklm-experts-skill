@@ -1,290 +1,252 @@
 ﻿# NotebookLM Skill Usage Patterns
 
-## Pattern 1: Initial Setup
+This file collects procedural workflow patterns for using the NotebookLM skill. These patterns are agent-led: the skill executes explicit actions, and the agent decides what to ask next.
+
+## Pattern 1: Initial Setup Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CheckAuth: Step 1
+    [*] --> CheckAuth: auth_manager.py status
 
-    CheckAuth --> chk1: auth_manager.py status
-    state chk1 <<choice>>
-    chk1 --> Authenticated: Valid session
-    chk1 --> NeedSetup: Not authenticated
+    CheckAuth --> AuthState
+    state AuthState <<choice>>
+    AuthState --> Ready: authenticated
+    AuthState --> NeedSetup: not authenticated
 
-    NeedSetup --> DoSetup: Step 2
-    DoSetup --> VisibleBrowser: auth_manager.py setup
-    VisibleBrowser --> WaitLogin: User logs in
-    WaitLogin --> Authenticated
+    NeedSetup --> Login: auth_manager.py setup
+    Login --> Ready
 
-    Authenticated --> AddNotebook: Step 3
-    AddNotebook --> DiscoverContent: ask_question.py overview query
-    DiscoverContent --> RegisterNB: notebook_manager.py add
-    RegisterNB --> [*]: Ready to query
+    Ready --> AddNotebook: notebook_manager.py add --url ...
+    AddNotebook --> ActivateNotebook: notebook_manager.py activate --id ...
+    ActivateNotebook --> [*]: ready to query
 
-    note right of VisibleBrowser
-        Browser MUST be visible
-    end note
-
-    note right of AddNotebook
-        ASK user for metadata
-        or use smart discovery
+    note right of Login
+        Browser should stay visible
+        so the user can sign in
     end note
 ```
 
 ---
 
-## Pattern 2: Adding Notebooks
+## Pattern 2: Notebook Registration Workflow
 
 ```mermaid
 stateDiagram-v2
     [*] --> UserSharesURL
 
-    UserSharesURL --> chk1
-    state chk1 <<choice>>
-    chk1 --> SmartDiscovery: Option A Recommended
-    chk1 --> AskUser: Option B Fallback
+    UserSharesURL --> ChooseMetadataMode
+    state ChooseMetadataMode <<choice>>
+    ChooseMetadataMode --> AutoDetect: use metadata fetch
+    ChooseMetadataMode --> AskUser: ask for explicit metadata
 
-    state SmartDiscovery {
-        [*] --> QueryNB: ask_question.py overview
-        QueryNB --> ExtractInfo: Parse name, desc, topics
-        ExtractInfo --> AddWithInfo: notebook_manager.py add
-        AddWithInfo --> [*]
-    }
+    AutoDetect --> AddNotebook: notebook_manager.py add --url ...
+    AskUser --> AddWithFields: notebook_manager.py add --url ... --name ... --description ... --topics ...
 
-    state AskUser {
-        [*] --> AskMeta: Ask user for metadata
-        AskMeta --> AddManual: notebook_manager.py add
-        AddManual --> [*]
-    }
+    AddNotebook --> ActivateNotebook
+    AddWithFields --> ActivateNotebook
+    ActivateNotebook --> [*]
 
-    SmartDiscovery --> [*]: Notebook registered
-    AskUser --> [*]: Notebook registered
-
-    note right of SmartDiscovery
-        NEVER guess content
-        NEVER use generic descriptions
+    note right of AutoDetect
+        Use the library workflow to infer
+        metadata when available
     end note
 ```
 
 ---
 
-## Pattern 3: Daily Research
+## Pattern 3: Daily Query Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CheckLib: notebook_manager.py list
+    [*] --> CheckLibrary: notebook_manager.py list
+    CheckLibrary --> SelectNotebook: choose active or specific notebook
+    SelectNotebook --> AskQuestion: ask_question.py --question ...
+    AskQuestion --> ReviewAnswer
 
-    CheckLib --> SelectNB: Pick relevant notebook
-    SelectNB --> AskDetailed: ask_question.py --question
-    AskDetailed --> GotAnswer
+    ReviewAnswer --> Completeness
+    state Completeness <<choice>>
+    Completeness --> FollowUp: more detail needed
+    Completeness --> [*]: answer set is sufficient
 
-    GotAnswer --> chk1
-    state chk1 <<choice>>
-    chk1 --> FollowUp: Needs more detail
-    chk1 --> [*]: Complete
-
-    FollowUp --> AskDetailed: Follow-up with context
+    FollowUp --> AskQuestion: ask a narrower follow-up
 ```
 
 ---
 
-## Pattern 4: Follow-Up Questions
+## Pattern 4: Follow-Up Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AskInitial: ask_question.py
+    [*] --> AskInitial: ask_question.py --question ...
+    AskInitial --> ReviewAnswer
 
-    AskInitial --> CheckResponse
+    ReviewAnswer --> GapCheck
+    state GapCheck <<choice>>
+    GapCheck --> AskFollowUp: gaps remain
+    GapCheck --> Synthesize: enough information
 
-    CheckResponse --> chk1
-    state chk1 <<choice>>
-    chk1 --> AnalyzeGaps: "Is that ALL you need?"
-    chk1 --> Synthesize: Answer complete
+    AskFollowUp --> ReviewAnswer: ask another explicit question
+    Synthesize --> Respond: agent writes final answer
+    Respond --> [*]
 
-    AnalyzeGaps --> chk2
-    state chk2 <<choice>>
-    chk2 --> AskFollowUp: Gaps found
-    chk2 --> Synthesize: No gaps
-
-    AskFollowUp --> CheckResponse: Specific follow-up
-    Synthesize --> RespondUser: Combine all answers
-    RespondUser --> [*]
-
-    note right of AnalyzeGaps
-        STOP before responding to user
-        ANALYZE answer completeness
+    note right of ReviewAnswer
+        The agent decides whether the
+        NotebookLM answer is complete
     end note
 ```
 
 ---
 
-## Pattern 5: Multi-Notebook Research
+## Pattern 5: Multi-Notebook Comparison Workflow
 
 ```mermaid
 stateDiagram-v2
     [*] --> ActivateNB1: notebook_manager.py activate --id nb1
-    ActivateNB1 --> QueryNB1: ask_question.py --question
+    ActivateNB1 --> QueryNB1: ask_question.py --question ...
     QueryNB1 --> ActivateNB2: notebook_manager.py activate --id nb2
-    ActivateNB2 --> QueryNB2: ask_question.py same question
-    QueryNB2 --> Compare: Synthesize answers
-    Compare --> [*]
+    ActivateNB2 --> QueryNB2: ask_question.py --question ...
+    QueryNB2 --> CompareResults: agent compares answers
+    CompareResults --> [*]
 ```
 
 ---
 
-## Pattern 6: Error Recovery
+## Pattern 6: Error Recovery Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ErrorType
+    [*] --> IdentifyError
 
-    state ErrorType <<choice>>
-    ErrorType --> AuthFail: Auth error
-    ErrorType --> BrowserCrash: Browser error
-    ErrorType --> RateLimit: Rate limited
+    state IdentifyError <<choice>>
+    IdentifyError --> AuthIssue: auth problem
+    IdentifyError --> BrowserIssue: browser problem
+    IdentifyError --> RateLimit: rate limited
 
-    AuthFail --> CheckStatus: auth_manager.py status
-    CheckStatus --> DoReauth: auth_manager.py reauth
-    DoReauth --> [*]: Resolved
+    AuthIssue --> CheckStatus: auth_manager.py status
+    CheckStatus --> Reauth: auth_manager.py reauth
+    Reauth --> [*]
 
-    BrowserCrash --> Cleanup: cleanup --preserve-library
-    Cleanup --> Reauth: auth_manager.py setup
-    Reauth --> [*]: Resolved
+    BrowserIssue --> Cleanup: cleanup_manager.py --preserve-library
+    Cleanup --> Retry: rerun auth or query command
+    Retry --> [*]
 
-    RateLimit --> chk1
-    state chk1 <<choice>>
-    chk1 --> WaitHour: Wait
-    chk1 --> SwitchAcct: auth_manager.py reauth
-    WaitHour --> [*]
-    SwitchAcct --> [*]
+    RateLimit --> WaitOrSwitch
+    state WaitOrSwitch <<choice>>
+    WaitOrSwitch --> Wait: pause and retry later
+    WaitOrSwitch --> SwitchProfile: auth_manager.py set-active --id ...
+    Wait --> [*]
+    SwitchProfile --> [*]
 ```
 
 ---
 
-## Pattern 7: Batch Processing
+## Pattern 7: Batch Query Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> LoadQuestions: Prepare question list
+    [*] --> PrepareQuestions
+    PrepareQuestions --> NextQuestion
+    NextQuestion --> AskQuestion: ask_question.py --question ... --notebook-id ...
+    AskQuestion --> Delay: short pause
 
-    LoadQuestions --> NextQ: Pick next question
-    NextQ --> AskQ: ask_question.py --question Q --notebook-id ID
-    AskQ --> WaitDelay: sleep 2s (rate limit)
-
-    WaitDelay --> chk1
-    state chk1 <<choice>>
-    chk1 --> NextQ: More questions
-    chk1 --> [*]: All done
+    Delay --> Remaining
+    state Remaining <<choice>>
+    Remaining --> NextQuestion: more questions remain
+    Remaining --> [*]: batch complete
 ```
 
 ---
 
-## Pattern 8: Notebook Organization
+## Pattern 8: Notebook Organization Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> OrganizeByDomain
+    [*] --> ChooseGrouping
 
-    state OrganizeByDomain {
-        [*] --> Backend: api, rest, backend
-        [*] --> Frontend: react, css, frontend
-        [*] --> Infra: database, devops
-    }
+    state ChooseGrouping <<choice>>
+    ChooseGrouping --> ByProject: project-focused topics
+    ChooseGrouping --> ByDomain: domain-focused topics
+    ChooseGrouping --> ByType: document-type tags
 
-    OrganizeByDomain --> SearchByDomain: notebook_manager.py search --query DOMAIN
-    SearchByDomain --> [*]
+    ByProject --> SearchProject: notebook_manager.py search --query ...
+    ByDomain --> SearchDomain: notebook_manager.py search --query ...
+    ByType --> SearchType: notebook_manager.py search --query ...
 
-    note right of OrganizeByDomain
-        Use consistent topic tags
-        ALWAYS ask user for descriptions
-    end note
+    SearchProject --> [*]
+    SearchDomain --> [*]
+    SearchType --> [*]
 ```
 
 ---
 
-## Pattern 9: Library Management
+## Pattern 9: Library Maintenance Workflow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Register: notebook_manager.py add (once per notebook)
-
-    Register --> ListIDs: notebook_manager.py list
-    ListIDs --> SetActive: activate --id project-beta
-
-    SetActive --> QueryDefault: ask_question.py uses active by default
-    QueryDefault --> QueryOverride: --notebook-id overrides active
-    QueryOverride --> [*]
-
-    note right of SetActive
-        Persistent across sessions
-    end note
+    [*] --> RegisterNotebook: notebook_manager.py add --url ...
+    RegisterNotebook --> ListNotebooks: notebook_manager.py list
+    ListNotebooks --> SetActive: notebook_manager.py activate --id ...
+    SetActive --> DefaultQuery: ask_question.py --question ...
+    DefaultQuery --> OverrideQuery: ask_question.py --question ... --notebook-id ...
+    OverrideQuery --> [*]
 ```
 
 ---
 
-## Copilot Workflow: User Sends URL
+## Copilot Workflow: User Shares URL
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DetectURL: notebooklm.google.com in message
+    [*] --> DetectNotebookURL
+    DetectNotebookURL --> CheckLibrary: notebook_manager.py list
 
-    DetectURL --> CheckLibrary: notebook_manager.py list
-    CheckLibrary --> chk1
-    state chk1 <<choice>>
-    chk1 --> QueryExisting: URL already in library
-    chk1 --> AskUserMeta: URL not in library
+    CheckLibrary --> KnownState
+    state KnownState <<choice>>
+    KnownState --> RegisterNotebook: URL not present
+    KnownState --> QueryNotebook: URL already known
 
-    AskUserMeta --> GetName: What to call this notebook?
-    GetName --> GetDesc: What does it contain?
-    GetDesc --> GetTopics: What topics?
-    GetTopics --> AddNB: notebook_manager.py add
-    AddNB --> QueryExisting
-
-    QueryExisting --> Answer: ask_question.py
-    Answer --> [*]
+    RegisterNotebook --> AddNotebook: notebook_manager.py add --url ...
+    AddNotebook --> ActivateNotebook: notebook_manager.py activate --id ...
+    ActivateNotebook --> QueryNotebook
+    QueryNotebook --> [*]
 ```
 
 ---
 
-## Copilot Workflow: Research Task
+## Copilot Workflow: Query and Synthesis
 
 ```mermaid
 stateDiagram-v2
     [*] --> UnderstandTask
+    UnderstandTask --> DraftQuestion: formulate explicit NotebookLM question
+    DraftQuestion --> AskQuestion: ask_question.py --question ...
+    AskQuestion --> ReviewAnswer
 
-    UnderstandTask --> FormulateQs: Craft comprehensive questions
-    FormulateQs --> AskQ: ask_question.py --question Q
+    ReviewAnswer --> NextStep
+    state NextStep <<choice>>
+    NextStep --> AskFollowUp: more NotebookLM detail needed
+    NextStep --> Synthesize: answer set is sufficient
 
-    AskQ --> CheckAnswer
-    state CheckAnswer <<choice>>
-    CheckAnswer --> AskFollowUp: "Is that ALL you need?"
-    CheckAnswer --> NextQ: Answer complete
-
-    AskFollowUp --> AskQ: Specific follow-up
-    NextQ --> chk1
-    state chk1 <<choice>>
-    chk1 --> FormulateQs: More questions
-    chk1 --> Synthesize: All answered
-
-    Synthesize --> Implement: Build from answers
-    Implement --> [*]
+    AskFollowUp --> AskQuestion
+    Synthesize --> ImplementOrReply: agent continues with implementation or response
+    ImplementOrReply --> [*]
 ```
-9. **Test auth regularly** - Before important tasks
-10. **Document everything** - Keep notes on notebooks
+
+---
 
 ## Quick Reference
 
-```bash
-# Always use run.py!
-.\\run.bat [script].py [args]
+```bat
+:: Always use the wrapper
+.\run.bat [script].py [args]
 
-# Common operations
-run.py auth_manager.py status          # Check auth
-run.py auth_manager.py setup           # Login (browser visible!)
-run.py notebook_manager.py list        # List notebooks
-run.py notebook_manager.py add ...     # Add (ask user for metadata!)
-run.py ask_question.py --question ...  # Query
-run.py cleanup_manager.py ...          # Clean up
+:: Common operations
+.\run.bat auth_manager.py status
+.\run.bat auth_manager.py setup --name "My Account"
+.\run.bat notebook_manager.py list
+.\run.bat notebook_manager.py add --url URL
+.\run.bat ask_question.py --question "..."
+.\run.bat cleanup_manager.py --preserve-library
 ```
 
-**Remember:** When in doubt, use run.py and ask the user for notebook details!
+Use these patterns when the task is procedural. Use `references/best-practices.md` for question quality, anti-patterns, and broader guidance.

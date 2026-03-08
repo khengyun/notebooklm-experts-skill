@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Universal runner for NotebookLM skill scripts
-Ensures all scripts run with the correct virtual environment
-"""
+"""Wrapper runner for NotebookLM skill scripts."""
 
 import os
 import sys
@@ -48,13 +45,19 @@ def ensure_venv():
 def main():
     """Main runner"""
     if len(sys.argv) < 2:
-        print("Usage: python run.py <script_name> [args...]")
+        if os.name == 'nt':
+            print("Usage: .\\run.bat <script_name> [args...]")
+        else:
+            print("Usage: ./run.sh <script_name> [args...]")
+
+        print("Direct runner: python scripts/run.py <script_name> [args...]")
+        print("Example with debug: .\\run.bat ask_question.py --debug --question \"...\"")
         print("\nAvailable scripts:")
         print("  ask_question.py    - Query NotebookLM")
-        print("  research_method.py  - Research across multiple notebooks")
         print("  notebook_manager.py - Manage notebook library")
-        print("  session_manager.py  - Manage sessions")
         print("  auth_manager.py     - Handle authentication")
+        print("  profile_manager.py  - Manage local profiles")
+        print("  add_profile.py      - Create profile helpers")
         print("  cleanup_manager.py  - Clean up skill data")
         print("  check_notebooks.py  - Validate notebook links")
         print("  debug_skill.py      - Smoke test all skill layers")

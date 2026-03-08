@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List
 
 sys.path.insert(0, str(Path(__file__).parent))
+from runtime_logging import configure_runtime, extract_runtime_flags, runtime_options_help, step
 
 # ANSI colors — supported on Windows Terminal, VS Code, and most CI systems
 _GREEN  = "\033[92m"
@@ -275,6 +276,7 @@ class SmokeTester:
     # ── Runner ────────────────────────────────────────────────────────────
 
     def run(self):
+        step("Run smoke test layers")
         print(f"\n{_BOLD}{'=' * 56}")
         print("  NotebookLM Skill — Smoke Test Runner")
         print(f"{'=' * 56}{_RESET}\n")
@@ -350,9 +352,13 @@ class SmokeTester:
 
 
 def main():
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("debug_skill", **runtime_opts)
+
     parser = argparse.ArgumentParser(
         description="Smoke test runner for NotebookLM skill"
     )
+    parser.epilog = runtime_options_help()
     parser.add_argument(
         "--no-browser",
         action="store_true",
@@ -363,7 +369,7 @@ def main():
         action="store_true",
         help="Also validate each notebook URL against NotebookLM (slower)"
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     tester = SmokeTester(
         run_browser=not args.no_browser,

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""
-Cleanup Manager for NotebookLM Skill
-Manages cleanup of skill data and browser state
-"""
+"""Cleanup manager for NotebookLM skill data and browser state."""
 
 import shutil
 import argparse
+import sys
 from pathlib import Path
 from typing import Dict, List, Any
+
+from runtime_logging import configure_runtime, extract_runtime_flags, runtime_options_help, step
 
 
 class CleanupManager:
@@ -261,6 +261,9 @@ class CleanupManager:
 
 def main():
     """Command-line interface for cleanup management"""
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("cleanup_manager", **runtime_opts)
+
     parser = argparse.ArgumentParser(
         description='Clean up NotebookLM skill data',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -279,6 +282,7 @@ Examples:
   python cleanup_manager.py --confirm --force
         """
     )
+    parser.epilog = f"{parser.epilog.rstrip()}\n\n{runtime_options_help()}"
 
     parser.add_argument(
         '--profile',
@@ -303,12 +307,13 @@ Examples:
         help='Skip confirmation prompt'
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Initialize manager
     manager = CleanupManager(profile_id=args.profile)
 
     if args.confirm:
+        step("Execute cleanup")
         # Show preview first unless forced
         if not args.force:
             manager.print_cleanup_preview(args.preserve_library)
@@ -333,6 +338,7 @@ Examples:
             print(f"  Warning: Failed: {result['failed_count']} items")
 
     else:
+        step("Preview cleanup targets")
         # Just show preview
         manager.print_cleanup_preview(args.preserve_library)
         print("\nNote: Virtual environment (.venv) is never deleted")

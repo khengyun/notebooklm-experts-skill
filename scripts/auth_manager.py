@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Authentication Manager for NotebookLM
-Handles Google login and browser state persistence with multi-profile support.
+Authentication manager for NotebookLM skill workflows.
 
 Implements hybrid auth approach:
 - Persistent browser profile (user_data_dir) for fingerprint consistency
@@ -26,6 +25,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import DATA_DIR
 from browser_utils import BrowserFactory
 from profile_manager import ProfileManager
+from runtime_logging import (
+    configure_runtime,
+    debug_kv,
+    expect,
+    extract_runtime_flags,
+    log_exception,
+    runtime_options_help,
+    step,
+)
 
 
 class AuthManager:
@@ -113,8 +121,10 @@ class AuthManager:
             print("Error: No profile set. Create one first with: auth_manager.py setup --name <name>")
             return False
 
+        step(f"Authentication setup for profile '{self.profile_id}'")
         print(f"Starting authentication setup for profile '{self.profile_id}'...")
         print(f"  Timeout: {timeout_minutes} minutes")
+        debug_kv("auth.setup", profile_id=self.profile_id, headless=headless, timeout_minutes=timeout_minutes)
 
         playwright = None
         context = None
@@ -132,6 +142,7 @@ class AuthManager:
 
             # Navigate to NotebookLM
             page = context.new_page()
+            expect("NotebookLM home should load or redirect to Google login")
             page.goto("https://notebooklm.google.com", wait_until="domcontentloaded")
 
             # Check if already authenticated
@@ -147,6 +158,7 @@ class AuthManager:
             try:
                 # Wait for URL to change to NotebookLM (regex ensures it's the actual domain, not a parameter)
                 timeout_ms = int(timeout_minutes * 60 * 1000)
+                expect("URL should return to https://notebooklm.google.com/ after login")
                 page.wait_for_url(re.compile(r"^https://notebooklm\.google\.com/"), timeout=timeout_ms)
 
                 print(f"  Login successful!")
@@ -161,7 +173,7 @@ class AuthManager:
                 return False
 
         except Exception as e:
-            print(f"  Error: {e}")
+            log_exception("  Error", e)
             return False
 
         finally:
@@ -215,6 +227,7 @@ class AuthManager:
             return False
 
         print(f"Clearing authentication data for profile '{self.profile_id}'...")
+        step(f"Clear auth state for profile '{self.profile_id}'")
 
         try:
             # Remove browser state
@@ -251,6 +264,7 @@ class AuthManager:
             True if successful
         """
         print("Starting re-authentication...")
+        step("Re-authentication flow")
 
         # Clear existing auth
         self.clear_auth()
@@ -270,6 +284,7 @@ class AuthManager:
             return False
 
         print(f"Validating authentication for profile '{self.profile_id}'...")
+        step(f"Validate auth for profile '{self.profile_id}'")
 
         playwright = None
         context = None
@@ -287,6 +302,7 @@ class AuthManager:
 
             # Try to access NotebookLM
             page = context.new_page()
+            expect("NotebookLM home should open without redirecting to Google login")
             page.goto("https://notebooklm.google.com", wait_until="domcontentloaded", timeout=30000)
 
             # Check if we can access NotebookLM
@@ -299,7 +315,7 @@ class AuthManager:
                 return False
 
         except Exception as e:
-            print(f"  Validation failed: {e}")
+            log_exception("  Validation failed", e)
             return False
 
         finally:
@@ -317,7 +333,11 @@ class AuthManager:
 
 def main():
     """Command-line interface for authentication management"""
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("auth_manager", **runtime_opts)
+
     parser = argparse.ArgumentParser(description='Manage NotebookLM authentication')
+    parser.epilog = runtime_options_help()
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
@@ -356,24 +376,28 @@ def main():
     delete_parser = subparsers.add_parser('delete', help='Delete a profile')
     delete_parser.add_argument('--id', required=True, help='Profile ID to delete')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command == 'list':
+        step("List profiles with auth status")
         pm = ProfileManager()
         pm.print_profiles()
         return
 
     if args.command == 'set-active':
+        step(f"Set active profile to '{args.id}'")
         pm = ProfileManager()
         pm.set_active(args.id)
         return
 
     if args.command == 'delete':
+        step(f"Delete profile '{args.id}'")
         pm = ProfileManager()
         pm.delete_profile(args.id)
         return
 
     if args.command == 'setup':
+        step("Dispatch auth setup command")
         profile_id = getattr(args, 'profile', None)
         if args.name:
             pm = ProfileManager()
@@ -388,6 +412,7 @@ def main():
             exit(1)
 
     elif args.command == 'status':
+        step("Read authentication status")
         auth = AuthManager(profile_id=getattr(args, 'profile', None))
         info = auth.get_auth_info()
         print(f"\nAuthentication Status (profile: {info.get('profile_id', 'N/A')}):")
@@ -399,6 +424,7 @@ def main():
         print(f"  State file: {info['state_file']}")
 
     elif args.command == 'validate':
+        step("Validate current authentication")
         auth = AuthManager(profile_id=getattr(args, 'profile', None))
         if auth.validate_auth():
             print("Authentication is valid and working")
@@ -407,11 +433,13 @@ def main():
             print("Run: auth_manager.py reauth")
 
     elif args.command == 'clear':
+        step("Clear authentication artifacts")
         auth = AuthManager(profile_id=getattr(args, 'profile', None))
         if auth.clear_auth():
             print("Authentication cleared")
 
     elif args.command == 'reauth':
+        step("Dispatch re-authentication")
         auth = AuthManager(profile_id=getattr(args, 'profile', None))
         if auth.re_auth(timeout_minutes=args.timeout):
             print("\nRe-authentication complete!")

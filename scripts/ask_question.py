@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Simple NotebookLM Question Interface
-Based on MCP server implementation - simplified without sessions
+"""Explicit NotebookLM question runner for local skill execution.
 
 Implements hybrid auth approach:
 - Persistent browser profile (user_data_dir) for fingerprint consistency
@@ -24,10 +22,20 @@ from auth_manager import AuthManager
 from notebook_manager import NotebookLibrary
 from config import QUERY_INPUT_SELECTORS, RESPONSE_SELECTORS
 from browser_utils import BrowserFactory, StealthUtils
+from runtime_logging import (
+    configure_runtime,
+    debug,
+    debug_kv,
+    expect,
+    extract_runtime_flags,
+    log_exception,
+    runtime_options_help,
+    step,
+)
 
 
-# Follow-up reminder (adapted from MCP server for stateless operation)
-# Since we don't have persistent sessions, we encourage comprehensive questions
+# Follow-up reminder for stateless operation.
+# Since each question opens a fresh browser flow, encourage complete follow-ups.
 FOLLOW_UP_REMINDER = (
     "\n\nEXTREMELY IMPORTANT: Is that ALL you need to know? "
     "You can always ask another question! Think about it carefully: "
@@ -50,6 +58,7 @@ def _extract_notebook_title(raw_title: str) -> str:
 
 def refresh_notebook_name_only(notebook_url: str, headless: bool = True, profile_id: str = None) -> bool:
     """Open a notebook and refresh its stored name without asking a question."""
+    step("Refresh notebook title from NotebookLM page")
     auth = AuthManager(profile_id=profile_id)
 
     if not auth.is_authenticated():
@@ -70,6 +79,7 @@ def refresh_notebook_name_only(notebook_url: str, headless: bool = True, profile
 
         page = context.new_page()
         print("  Opening notebook for name refresh...")
+        expect("Notebook page should load and expose a browser title")
         page.goto(notebook_url, wait_until="domcontentloaded")
         page.wait_for_url(re.compile(r"^https://notebooklm\.google\.com/"), timeout=10000)
 
@@ -98,7 +108,7 @@ def refresh_notebook_name_only(notebook_url: str, headless: bool = True, profile
         return True
 
     except Exception as e:
-        print(f"  Error refreshing notebook name: {e}")
+        log_exception("  Error refreshing notebook name", e)
         return False
 
     finally:
@@ -129,6 +139,8 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         Answer text from NotebookLM
     """
     auth = AuthManager(profile_id=profile_id)
+    step("Prepare NotebookLM question flow")
+    debug_kv("ask.start", notebook_url=notebook_url, profile_id=profile_id, headless=headless)
 
     if not auth.is_authenticated():
         print("Warning: Not authenticated. Run: auth_manager.py setup")
@@ -157,9 +169,11 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         # Navigate to notebook
         page = context.new_page()
         print("  Opening notebook...")
+        expect("Notebook page should finish initial load")
         page.goto(notebook_url, wait_until="domcontentloaded")
 
         # Wait for NotebookLM
+        expect("URL should remain under notebooklm.google.com")
         page.wait_for_url(re.compile(r"^https://notebooklm\.google\.com/"), timeout=10000)
 
         # Refresh notebook name in library if page title changed.
@@ -175,8 +189,9 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         except Exception as refresh_err:
             print(f"  Warning: Could not refresh notebook name: {refresh_err}")
 
-        # Wait for query input (MCP approach)
+        # Wait for the NotebookLM query input to become usable.
         print("  Waiting for query input...")
+        expect("At least one configured query textarea selector should become visible")
         query_element = None
 
         for selector in QUERY_INPUT_SELECTORS:
@@ -210,8 +225,9 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         # Small pause
         StealthUtils.random_delay(500, 1500)
 
-        # Wait for response (MCP approach: poll for stable text)
+        # Poll until the answer text stabilizes.
         print("  Waiting for answer...")
+        expect("NotebookLM should produce a stable answer before timeout")
 
         answer = None
         stable_count = 0
@@ -228,7 +244,7 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
             except:
                 pass
 
-            # Try to find response with MCP selectors
+            # Try the configured response selectors until a stable answer appears.
             for selector in RESPONSE_SELECTORS:
                 try:
                     elements = page.query_selector_all(selector)
@@ -242,6 +258,7 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
                                 stable_count += 1
                                 if stable_count >= 3:  # Stable for 3 polls
                                     answer = text
+                                    debug(f"Stable answer detected with selector: {selector}")
                                     break
                             else:
                                 stable_count = 0
@@ -263,7 +280,7 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         return answer + FOLLOW_UP_REMINDER
 
     except Exception as e:
-        print(f"  Error: {e}")
+        log_exception("  Error", e)
         import traceback
         traceback.print_exc()
         return None
@@ -284,7 +301,11 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
 
 
 def main():
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("ask_question", **runtime_opts)
+
     parser = argparse.ArgumentParser(description='Ask NotebookLM a question')
+    parser.epilog = runtime_options_help()
 
     parser.add_argument('--question', help='Question to ask')
     parser.add_argument('--notebook-url', help='NotebookLM notebook URL')
@@ -297,7 +318,7 @@ def main():
         help='Open notebook and refresh stored notebook name without sending a question',
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Resolve notebook URL
     notebook_url = args.notebook_url
@@ -305,6 +326,7 @@ def main():
     profile_id = getattr(args, 'profile', None)
 
     if not notebook_url and args.notebook_id:
+        step(f"Resolve notebook by id '{args.notebook_id}'")
         library = NotebookLibrary(profile_id=profile_id)
         notebook = library.get_notebook(args.notebook_id)
         if notebook:
@@ -314,6 +336,7 @@ def main():
             return 1
 
     if not notebook_url:
+        step("Resolve notebook from active library context")
         # Check for active notebook first
         library = NotebookLibrary(profile_id=profile_id)
         active = library.get_active_notebook()
@@ -329,13 +352,14 @@ def main():
                     mark = " [ACTIVE]" if nb.get('id') == library.active_notebook_id else ""
                     print(f"  {nb['id']}: {nb['name']}{mark}")
                 print("\nSpecify with --notebook-id or set active:")
-                print("python scripts/run.py notebook_manager.py activate --id ID")
+                print(".\\run.bat notebook_manager.py activate --id ID")
             else:
                 print("No notebooks in library. Add one first:")
-                print("python scripts/run.py notebook_manager.py add --url URL --name NAME --description DESC --topics TOPICS")
+                print(".\\run.bat notebook_manager.py add --url URL --name NAME --description DESC --topics TOPICS")
             return 1
 
     if args.refresh_name_only:
+        step("Run refresh-name-only mode")
         ok = refresh_notebook_name_only(
             notebook_url=notebook_url,
             headless=not args.show_browser,
@@ -348,6 +372,7 @@ def main():
         return 1
 
     # Ask the question
+    step("Submit NotebookLM question")
     answer = ask_notebooklm(
         question=args.question,
         notebook_url=notebook_url,

@@ -1,7 +1,4 @@
-"""
-Browser Utilities for NotebookLM Skill
-Handles browser launching, stealth features, and common interactions
-"""
+"""Browser helpers for NotebookLM skill workflows."""
 
 import json
 import time
@@ -11,6 +8,7 @@ from typing import Optional, List
 
 from patchright.sync_api import Playwright, BrowserContext, Page
 from config import BROWSER_ARGS, USER_AGENT
+from runtime_logging import expect, log_exception, step
 
 
 class BrowserFactory:
@@ -53,7 +51,7 @@ class BrowserFactory:
             args=BROWSER_ARGS
         )
 
-        # Cookie Workaround for Playwright bug #36139
+        # Cookie workaround for Playwright bug #36139.
         # Session cookies (expires=-1) don't persist in user_data_dir automatically
         BrowserFactory._inject_cookies(context, state_file)
 
@@ -69,7 +67,7 @@ class BrowserFactory:
                     if 'cookies' in state and len(state['cookies']) > 0:
                         context.add_cookies(state['cookies'])
             except Exception as e:
-                print(f"  Warning: Could not load state.json: {e}")
+                log_exception("  Warning: Could not load state.json", e)
 
 
 class StealthUtils:
@@ -147,6 +145,7 @@ def add_source_web(
     from patchright.sync_api import sync_playwright
     from auth_manager import AuthManager
 
+    step("Add web source through NotebookLM browser flow")
     auth = AuthManager(profile_id=profile_id)
     if not auth.is_authenticated():
         print("Error: Not authenticated. Run auth_manager.py setup first.")
@@ -167,6 +166,7 @@ def add_source_web(
         page.set_viewport_size({"width": 1440, "height": 900})
 
         print("  Navigating to notebook...")
+        expect("Notebook page should load and show the add-source action")
         page.goto(notebook_url, wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
 
@@ -212,7 +212,7 @@ def add_source_web(
         return True
 
     except Exception as e:
-        print(f"  Error adding source: {e}")
+        log_exception("  Error adding source", e)
         return False
 
     finally:

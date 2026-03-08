@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-NotebookLM Skill Scripts Package
-Provides automatic environment management for all scripts
-"""
+"""NotebookLM skill script package and local environment bootstrap."""
 
 import os
 import sys
@@ -55,7 +52,7 @@ def ensure_venv_and_run():
                 check=True
             )
 
-            # Also install patchright's chromium
+            # Install real Chrome for consistent Patchright behavior.
             print("   Setting up browser automation...")
             if os.name == 'nt':
                 python_exe = venv_dir / "Scripts" / "python.exe"
@@ -63,7 +60,7 @@ def ensure_venv_and_run():
                 python_exe = venv_dir / "bin" / "python"
 
             subprocess.run(
-                [str(python_exe), "-m", "patchright", "install", "chromium"],
+                [str(python_exe), "-m", "patchright", "install", "chrome"],
                 check=True,
                 capture_output=True
             )
@@ -73,8 +70,11 @@ def ensure_venv_and_run():
     # If we're here and not in the venv, we should recommend using the venv
     if not in_venv:
         print("\nWarning: Running outside virtual environment")
-        print("   Recommended: Use scripts/run.py to ensure clean execution")
-        print("   Or activate: source .venv/bin/activate")
+        if os.name == 'nt':
+            print("   Recommended: Use .\\run.bat to ensure clean execution")
+        else:
+            print("   Recommended: Use ./run.sh to ensure clean execution")
+            print("   Or activate: source .venv/bin/activate")
 
 
 # Check environment when module is imported

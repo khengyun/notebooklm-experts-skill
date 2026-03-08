@@ -10,6 +10,8 @@ import subprocess
 import venv
 from pathlib import Path
 
+from runtime_logging import configure_runtime, expect, extract_runtime_flags, runtime_options_help, step
+
 
 class SkillEnvironment:
     """Manages skill-specific virtual environment"""
@@ -30,6 +32,7 @@ class SkillEnvironment:
 
     def ensure_venv(self) -> bool:
         """Ensure virtual environment exists and is set up"""
+        step("Ensure isolated Python environment")
 
         # Check if we're already in the correct venv
         if self.is_in_skill_venv():
@@ -59,6 +62,7 @@ class SkillEnvironment:
                 )
 
                 # Install requirements
+                expect("pip should install all packages from requirements.txt successfully")
                 result = subprocess.run(
                     [str(self.venv_pip), "install", "-r", str(self.requirements_file)],
                     check=True,
@@ -81,7 +85,7 @@ class SkillEnvironment:
                     print("Chrome installed")
                 except subprocess.CalledProcessError as e:
                     print(f"Warning: Failed to install Chrome: {e}")
-                    print("   You may need to run manually: python -m patchright install chrome")
+                    print(f"   You may need to run manually: {self.venv_python} -m patchright install chrome")
                     print("   Chrome is required (not Chromium) for reliability!")
 
                 return True
@@ -149,9 +153,13 @@ def main():
     """Main entry point for environment setup"""
     import argparse
 
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("setup_environment", **runtime_opts)
+
     parser = argparse.ArgumentParser(
         description='Setup NotebookLM skill environment'
     )
+    parser.epilog = runtime_options_help()
 
     parser.add_argument(
         '--check',
@@ -170,7 +178,7 @@ def main():
         help='Arguments to pass to the script'
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     env = SkillEnvironment()
 

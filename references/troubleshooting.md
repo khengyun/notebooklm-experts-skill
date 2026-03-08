@@ -1,252 +1,203 @@
 ﻿# NotebookLM Skill Troubleshooting
 
+This file is for diagnosing failures in the local skill workflow. It does not describe an MCP server or standalone hosted service. In most cases, the fix is to restore local execution, authentication, browser state, or notebook selection.
+
 ## Error Decision Tree
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ErrorOccurs
+    [*] --> ObserveFailure
 
-    ErrorOccurs --> Identify
-    state Identify <<choice>>
-    Identify --> ModuleErr: ModuleNotFoundError
-    Identify --> AuthErr: Auth failed
-    Identify --> BrowserErr: Browser crash
-    Identify --> RateErr: Rate limit
-    Identify --> NBNotFound: Notebook not found
-    Identify --> ScriptErr: Script not working
+    ObserveFailure --> IdentifyClass
+    state IdentifyClass <<choice>>
+    IdentifyClass --> WrapperIssue: command run directly
+    IdentifyClass --> AuthIssue: login or session problem
+    IdentifyClass --> BrowserIssue: Chrome or automation problem
+    IdentifyClass --> NotebookIssue: notebook lookup or access problem
+    IdentifyClass --> RateLimitIssue: NotebookLM quota reached
 
-    ModuleErr --> UseRunBat: Use .\run.bat wrapper
-    UseRunBat --> [*]: Resolved
+    WrapperIssue --> UseWrapper: switch to .\run.bat or ./run.sh
+    UseWrapper --> [*]
 
-    AuthErr --> AuthFix
-    BrowserErr --> BrowserFix
-    RateErr --> RateFix
-    NBNotFound --> NBFix
-    ScriptErr --> UseRunBat
+    AuthIssue --> AuthFlow
+    BrowserIssue --> BrowserFlow
+    NotebookIssue --> NotebookFlow
+    RateLimitIssue --> RateFlow
 
-    AuthFix --> [*]: See Auth Flow below
-    BrowserFix --> [*]: See Browser Flow below
-    RateFix --> [*]: See Rate Flow below
-    NBFix --> [*]: See Notebook Flow below
+    AuthFlow --> [*]
+    BrowserFlow --> [*]
+    NotebookFlow --> [*]
+    RateFlow --> [*]
 ```
 
----
-
-## Auth Errors
+## Auth Problems
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AuthError
+    [*] --> CheckAuthStatus: auth_manager.py status
 
-    AuthError --> chk1
-    state chk1 <<choice>>
-    chk1 --> NotAuth: Not authenticated error
-    chk1 --> ExpiresOften: Auth expires frequently
-    chk1 --> Blocked: Google blocks login
+    CheckAuthStatus --> AuthState
+    state AuthState <<choice>>
+    AuthState --> FirstSetup: never authenticated
+    AuthState --> Reauth: session expired or stale
+    AuthState --> CorrectAccount: wrong Google account active
 
-    NotAuth --> CheckStatus: auth_manager.py status
-    CheckStatus --> chk2
-    state chk2 <<choice>>
-    chk2 --> DoSetup: Never authenticated
-    chk2 --> DoReauth: Session expired
+    FirstSetup --> VisibleLogin: auth_manager.py setup
+    VisibleLogin --> [*]
 
-    DoSetup --> [*]: setup (VISIBLE browser!)
-    DoReauth --> [*]: reauth
+    Reauth --> RefreshSession: auth_manager.py reauth
+    RefreshSession --> [*]
 
-    ExpiresOften --> CleanOld: cleanup --preserve-library
-    CleanOld --> FreshSetup: auth_manager.py setup --timeout 15
-    FreshSetup --> [*]
+    CorrectAccount --> ClearAndSetup: clear or switch profile, then setup
+    ClearAndSetup --> [*]
 
-    Blocked --> DedicatedAcct: Use dedicated Google account
-    DedicatedAcct --> VisibleSetup: auth_manager.py setup
-    VisibleSetup --> [*]
-
-    note right of DoSetup
-        Browser MUST be visible
-        User logs in manually
+    note right of VisibleLogin
+        Keep the browser visible so the user
+        can complete sign-in manually.
     end note
 ```
 
-```bash
+Common commands:
+
+```bat
 .\run.bat auth_manager.py status
 .\run.bat auth_manager.py setup
 .\run.bat auth_manager.py reauth
 ```
 
----
-
-## Browser Errors
+## Browser Problems
 
 ```mermaid
 stateDiagram-v2
-    [*] --> BrowserError
+    [*] --> BrowserFailure
 
-    BrowserError --> chk1
-    state chk1 <<choice>>
-    chk1 --> CrashHang: Crash or hang
-    chk1 --> NotFound: Browser not found
+    BrowserFailure --> BrowserCase
+    state BrowserCase <<choice>>
+    BrowserCase --> MissingChrome: Chrome not installed for patchright
+    BrowserCase --> CrashedState: browser crashes or hangs
+    BrowserCase --> StaleSession: browser state is corrupted
 
-    CrashHang --> KillProcs: Kill chrome processes
-    KillProcs --> CleanState: cleanup --confirm --preserve-library
-    CleanState --> DoReauth: auth_manager.py reauth
-    DoReauth --> [*]: Resolved
+    MissingChrome --> InstallChrome: python install.py or patchright install chrome
+    InstallChrome --> [*]
 
-    NotFound --> AutoInstall: run.bat auto-installs
-    AutoInstall --> chk2
-    state chk2 <<choice>>
-    chk2 --> [*]: Resolved
-    chk2 --> ManualInstall: patchright install chromium
-    ManualInstall --> [*]: Resolved
+    CrashedState --> CleanupState: cleanup_manager.py --preserve-library
+    CleanupState --> RetryAuthOrQuery
+    RetryAuthOrQuery --> [*]
+
+    StaleSession --> ReauthAfterCleanup: cleanup then auth_manager.py reauth
+    ReauthAfterCleanup --> [*]
 ```
 
----
+Checks to perform:
+- Confirm Google Chrome is available, not only Chromium.
+- Re-run through the wrapper instead of invoking script modules directly.
+- Clean browser state before attempting a fresh auth flow.
 
-## Rate Limiting
-
-```mermaid
-stateDiagram-v2
-    [*] --> RateLimited: 50 queries/day exceeded
-
-    RateLimited --> chk1
-    state chk1 <<choice>>
-    chk1 --> WaitReset: Option 1: Wait
-    chk1 --> SwitchAcct: Option 2: Switch account
-
-    WaitReset --> [*]: Resets at midnight PST
-
-    SwitchAcct --> ClearAuth: auth_manager.py clear
-    ClearAuth --> NewSetup: auth_manager.py setup
-    NewSetup --> [*]: New account active
-```
-
----
-
-## Notebook Access Errors
+## Notebook Selection Or Access Problems
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NBError
+    [*] --> NotebookFailure
 
-    NBError --> chk1
-    state chk1 <<choice>>
-    chk1 --> NotFoundNB: Notebook not found
-    chk1 --> AccessDenied: Access denied
-    chk1 --> WrongNB: Wrong notebook active
+    NotebookFailure --> NotebookCase
+    state NotebookCase <<choice>>
+    NotebookCase --> MissingNotebook: notebook not registered locally
+    NotebookCase --> WrongActive: wrong notebook is active
+    NotebookCase --> AccessDenied: shared URL or account mismatch
 
-    NotFoundNB --> ListNBs: notebook_manager.py list
-    ListNBs --> chk2
-    state chk2 <<choice>>
-    chk2 --> ActivateIt: Found in list
-    chk2 --> AddNew: Not in list
-    ActivateIt --> [*]: activate --id ID
-    AddNew --> [*]: add --url URL --name NAME
+    MissingNotebook --> ListLibrary: notebook_manager.py list
+    ListLibrary --> AddNotebook: notebook_manager.py add --url ...
+    AddNotebook --> [*]
 
-    AccessDenied --> CheckSharing: Still shared publicly?
-    CheckSharing --> chk3
-    state chk3 <<choice>>
-    chk3 --> ReaddNB: URL changed
-    chk3 --> FixAcct: Wrong Google account
-    ReaddNB --> [*]
-    FixAcct --> [*]: setup with correct account
-
-    WrongNB --> ListActive: notebook_manager.py list
-    ListActive --> ActivateCorrect: activate --id correct-id
+    WrongActive --> ActivateCorrect: notebook_manager.py activate --id ...
     ActivateCorrect --> [*]
+
+    AccessDenied --> CheckURLAndAccount
+    CheckURLAndAccount --> ReaddOrReauth
+    ReaddOrReauth --> [*]
 ```
 
----
+Useful commands:
 
-## Recovery Flow
+```bat
+.\run.bat notebook_manager.py list
+.\run.bat notebook_manager.py add --url URL
+.\run.bat notebook_manager.py activate --id NOTEBOOK_ID
+```
+
+## Rate Limit Problems
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Diagnose: Multiple things broken
+    [*] --> HitLimit
 
-    Diagnose --> BackupLib: Backup library.json
-    BackupLib --> CleanAll: cleanup_manager.py --confirm --force
-    CleanAll --> RemoveVenv: Remove .venv
-    RemoveVenv --> Reinstall: run.bat auth_manager.py setup
-    Reinstall --> RestoreLib: Restore library backup
-    RestoreLib --> Verify: Test all operations
+    HitLimit --> ChooseResponse
+    state ChooseResponse <<choice>>
+    ChooseResponse --> WaitAndRetry: defer work until quota resets
+    ChooseResponse --> ReduceQueries: ask fewer, narrower questions
+    ChooseResponse --> ChangeAccount: switch to another prepared profile
 
-    Verify --> chk1
-    state chk1 <<choice>>
-    chk1 --> [*]: All working
-    chk1 --> Diagnose: Still broken
-```
+    WaitAndRetry --> [*]
+    ReduceQueries --> [*]
+    ChangeAccount --> [*]
 ```
 
-### Partial recovery (keep data)
-```bash
-# Keep auth and library, fix execution
-cd <skill-dir>
-rm -rf .venv
+When rate limited:
+- Prefer fewer, higher-value questions.
+- Reuse prior answers when possible.
+- Switch profiles only if that is already part of your normal setup.
 
-# run.py will recreate venv automatically
-.\\run.bat auth_manager.py status
+## Full Recovery Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> BackupLocalData
+    BackupLocalData --> CleanupState: cleanup_manager.py --confirm --force
+    CleanupState --> RebuildEnv: recreate .venv if needed
+    RebuildEnv --> SetupAuth: auth_manager.py setup
+    SetupAuth --> RestoreLibrary: import or restore notebook metadata
+    RestoreLibrary --> VerifyFlow
+    VerifyFlow --> [*]
 ```
 
-## Error Messages Reference
+Safer partial recovery:
 
-### Authentication Errors
-| Error | Cause | Solution |
-|-------|-------|----------|
-| Not authenticated | No valid auth | `run.py auth_manager.py setup` |
-| Authentication expired | Session old | `run.py auth_manager.py reauth` |
-| Invalid credentials | Wrong account | Check Google account |
-| 2FA required | Security challenge | Complete in visible browser |
+```bat
+:: Recreate local environment but keep library data if you have backed it up
+python install.py
+.\run.bat auth_manager.py status
+```
 
-### Browser Errors
-| Error | Cause | Solution |
-|-------|-------|----------|
-| Browser not found | Chromium missing | Use run.py (auto-installs) |
-| Connection refused | Browser crashed | Kill processes, restart |
-| Timeout waiting | Page slow | Increase timeout |
-| Context closed | Browser terminated | Check logs for crashes |
+## Error Reference
 
-### Notebook Errors
-| Error | Cause | Solution |
-|-------|-------|----------|
-| Notebook not found | Invalid ID | `run.py notebook_manager.py list` |
-| Access denied | Not shared | Re-share in NotebookLM |
-| Invalid URL | Wrong format | Use full NotebookLM URL |
-| No active notebook | None selected | `run.py notebook_manager.py activate` |
+| Symptom | Likely Cause | Recommended Action |
+|---------|--------------|--------------------|
+| `ModuleNotFoundError` | script bypassed the local environment | use `.\run.bat` |
+| auth expired | saved session is no longer valid | run `auth_manager.py reauth` |
+| browser launch failure | missing Chrome or stale browser state | reinstall Chrome or clean state |
+| notebook not found | notebook is not in local library | run `notebook_manager.py list` or `add` |
+| answer comes from wrong notebook | wrong active notebook | run `notebook_manager.py activate --id ...` |
 
 ## Prevention Tips
 
-1. **Always use run.py** - Prevents 90% of issues
-2. **Regular maintenance** - Clear browser state weekly
-3. **Monitor queries** - Track daily count to avoid limits
-4. **Backup library** - Export notebook list regularly
-5. **Use dedicated account** - Separate Google account for automation
+1. Always use `run.bat` or `run.sh` instead of calling scripts directly.
+2. Keep notebook metadata organized so activation mistakes are rare.
+3. Use a dedicated account if browser automation policies are strict.
+4. Back up or export your notebook library before destructive cleanup.
+5. Treat cleanup as a local repair step, not a normal daily workflow.
 
-## Getting Help
+## Minimal Diagnostic Bundle
 
-### Diagnostic information to collect
-```bash
-# System info
-python --version
-cd <skill-dir>
-ls -la
+When reporting an issue, collect:
 
-# Skill status
-.\\run.bat auth_manager.py status
-.\\run.bat notebook_manager.py list | head -5
-
-# Check data directory
-ls -la <skill-dir>/data/
+```bat
+.\run.bat auth_manager.py status
+.\run.bat notebook_manager.py list
+.\run.bat debug_skill.py
 ```
 
-### Common questions
-
-**Q: Why doesn't this work without network access?**
-A: This skill requires a local environment with browser access. Use GitHub Copilot in VS Code with the skill installed locally.
-
-**Q: Can I use multiple Google accounts?**
-A: Yes, use `run.py auth_manager.py reauth` to switch.
-
-**Q: How to increase rate limit?**
-A: Use multiple accounts or upgrade to Google Workspace.
-
-**Q: Is this safe for my Google account?**
-A: Use dedicated account for automation. Only accesses NotebookLM.
+Add a short note saying whether the failure is:
+- before login,
+- during browser automation,
+- during notebook selection, or
+- after the question is submitted.

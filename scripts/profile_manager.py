@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""
-Profile Manager for NotebookLM Skill
-Manages multiple Google account profiles with isolated browser state and libraries.
-"""
+"""Profile registry manager for NotebookLM skill workflows."""
 
 import json
 import shutil
 import time
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from config import DATA_DIR
+from runtime_logging import configure_runtime, extract_runtime_flags, runtime_options_help, step
 
 PROFILES_DIR = DATA_DIR / "profiles"
 PROFILES_FILE = DATA_DIR / "profiles.json"
@@ -222,6 +221,10 @@ class ProfileManager:
             result.append(info)
         return result
 
+    def get_profiles(self) -> List[Dict[str, Any]]:
+        """Return the raw profile registry for compatibility with older helpers."""
+        return list(self.profiles)
+
     def print_profiles(self):
         profiles = self.list_profiles()
         if not profiles:
@@ -248,9 +251,12 @@ class ProfileManager:
 def main():
     """Command-line interface for profile management."""
     import argparse
-    import sys
+
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("profile_manager", **runtime_opts)
 
     parser = argparse.ArgumentParser(description='Manage NotebookLM profiles')
+    parser.epilog = runtime_options_help()
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
     # list command
@@ -268,28 +274,32 @@ def main():
     delete_parser = subparsers.add_parser('delete', help='Delete a profile')
     delete_parser.add_argument('--id', required=True, help='Profile ID')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     pm = ProfileManager()
 
     if args.command == 'list':
+        step("List profiles")
         pm.print_profiles()
 
     elif args.command == 'create':
+        step(f"Create profile '{args.name}'")
         entry = pm.create_profile(args.name)
         print(f"Profile created: {entry['id']}")
         print(f"Next steps:")
         print(f"  1. Authenticate this profile:")
-        print(f"     python scripts/run.py auth_manager.py setup --profile {entry['id']}")
+        print(f"     .\\run.bat auth_manager.py setup --profile {entry['id']}")
         print(f"  2. Or set it as active and authenticate later:")
-        print(f"     python scripts/run.py profile_manager.py set-active --id {entry['id']}")
+        print(f"     .\\run.bat profile_manager.py set-active --id {entry['id']}")
 
     elif args.command == 'set-active':
+        step(f"Set active profile to '{args.id}'")
         pm.set_active(args.id)
         profile = pm._find(args.id)
         if profile:
             print(f"Active profile: {profile['name']} ({args.id})")
 
     elif args.command == 'delete':
+        step(f"Delete profile '{args.id}'")
         if pm.delete_profile(args.id):
             print(f"Profile deleted: {args.id}")
         else:

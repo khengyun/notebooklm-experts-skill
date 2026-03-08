@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Interactive Profile Creator for NotebookLM Skill
-Guides user through creating and authenticating a new profile with a friendly UX.
-"""
+"""Interactive helper for creating and authenticating a NotebookLM profile."""
 
 import sys
 import time
@@ -14,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from profile_manager import ProfileManager
 from auth_manager import AuthManager
+from runtime_logging import configure_runtime, extract_runtime_flags, step
 
 
 def print_header(text: str, char: str = "="):
@@ -97,6 +95,7 @@ def confirm_profile_details(profile_name: str, profile_id: str) -> bool:
 
 def create_profile_interactive():
     """Main interactive flow to create and authenticate a profile"""
+    step("Interactive profile creation flow")
     
     print_header("NotebookLM Profile Creator", "═")
     
@@ -157,13 +156,13 @@ def create_profile_interactive():
             print("NEXT: Use this profile to query NotebookLM")
             print("─" * 60)
             print("\nQuery with this profile:")
-            print(f"  .\\ run.bat ask_question.py --question \"Your question\" --profile {profile_id}")
+            print(f"  .\\run.bat ask_question.py --question \"Your question\" --profile {profile_id}")
             
             print("\nSwitch to this profile as active:")
-            print(f"  .\\ run.bat auth_manager.py set-active --id {profile_id}")
+            print(f"  .\\run.bat profile_manager.py set-active --id {profile_id}")
             
             print("\nView all profiles:")
-            print("  .\\ run.bat auth_manager.py list")
+            print("  .\\run.bat profile_manager.py list")
             
             print("\n" + "═" * 60)
             print("🎯 You're all set! Happy querying! 🚀")
@@ -181,10 +180,10 @@ def create_profile_interactive():
             print("TRY AGAIN")
             print("─" * 60)
             print(f"\nRe-authenticate this profile:")
-            print(f"  .\\ run.bat auth_manager.py reauth --profile {profile_id}")
+            print(f"  .\\run.bat auth_manager.py reauth --profile {profile_id}")
             print(f"\nOr delete and create new:")
-            print(f"  .\\ run.bat auth_manager.py delete --id {profile_id}")
-            print(f"  python add_profile.py")
+            print(f"  .\\run.bat profile_manager.py delete --id {profile_id}")
+            print(f"  .\\run.bat add_profile.py")
             print("\n" + "═" * 60 + "\n")
             
             return False
@@ -200,5 +199,7 @@ def create_profile_interactive():
 
 
 if __name__ == "__main__":
+    runtime_opts, _argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("add_profile", **runtime_opts)
     success = create_profile_interactive()
     sys.exit(0 if success else 1)

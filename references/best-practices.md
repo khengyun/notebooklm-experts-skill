@@ -40,265 +40,208 @@ stateDiagram-v2
 ```
 
 ---
+---
+name: notebooklm
+version: 1.0.0
+description: Best practices for agent-led NotebookLM skill usage
+---
 
-### Pattern 3: Discovery Before Add
+# NotebookLM Skill Best Practices
+
+This file focuses on how to use the skill well. The skill executes explicit NotebookLM operations. The agent stays responsible for selecting notebooks, asking follow-up questions, and synthesizing the final answer.
+
+## Core Principle
+
+Use NotebookLM for source-grounded retrieval from notebooks the user already prepared.
+
+Do not use the skill as a substitute for planning, coding judgment, or broad open-ended research.
+
+## Pattern 1: Broad Then Narrow
 
 ```mermaid
 stateDiagram-v2
-    [*] --> QueryContent: ask_question.py --notebook-url URL
+    [*] --> SelectNotebook: notebook_manager.py activate --id ...
+    SelectNotebook --> AskOverview: ask_question.py broad overview
+    AskOverview --> ReviewOverview
 
-    QueryContent --> ExtractMeta: Parse name, desc, topics
-    ExtractMeta --> AddWithMeta: notebook_manager.py add
-    AddWithMeta --> [*]: Notebook registered with accurate metadata
+    ReviewOverview --> NextMove
+    state NextMove <<choice>>
+    NextMove --> AskDetail1: key area identified
+    NextMove --> Stop: overview is enough
 
-    note right of QueryContent
-        Question: What is the content?
-        What topics are covered?
-    end note
+    AskDetail1 --> AskDetail2: ask targeted follow-up
+    AskDetail2 --> Synthesize: agent combines results
+    Stop --> [*]
+    Synthesize --> [*]
 ```
 
----
+Why it works:
+- The first question maps the notebook before you spend more queries.
+- Later questions can reference exact sections, features, or decisions.
 
-## Question Strategies
+## Pattern 2: Compare Multiple Notebooks
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PickStrategy
-
-    state PickStrategy <<choice>>
-    PickStrategy --> BroadToNarrow: Start broad, then narrow
-    PickStrategy --> RequestExamples: Ask for examples
-    PickStrategy --> AskComparisons: Compare A vs B
-    PickStrategy --> Troubleshoot: Debug specific issue
-
-    BroadToNarrow --> Overview: What does this cover?
-    Overview --> Specific: How do I implement X?
-    Specific --> [*]
-
-    RequestExamples --> Example: Show example of X
-    Example --> [*]
-
-    AskComparisons --> Diff: Differences between A and B?
-    Diff --> [*]
-
-    Troubleshoot --> Errors: Common errors when doing X?
-    Errors --> [*]
+    [*] --> ActivateA: notebook_manager.py activate --id nb_a
+    ActivateA --> QueryA: ask_question.py question for notebook A
+    QueryA --> ActivateB: notebook_manager.py activate --id nb_b
+    ActivateB --> QueryB: ask_question.py same question for notebook B
+    QueryB --> Compare: agent compares outputs
+    Compare --> [*]
 ```
 
-### Anti-Patterns
+Best use cases:
+- Comparing APIs, policies, or architecture notes.
+- Checking whether two sources describe the same workflow differently.
 
-| Avoid | Instead |
-|-------|---------|
-| "Tell me everything" | "What are the main sections?" |
-| "What is on page 47?" | "Configuration options for X?" |
-| "Fix this code" | "How to implement Y feature?" |
-| "Why did they design it?" | "What does docs say about Z decision?" |
+## Pattern 3: Register Before Relying On It
 
----
+```mermaid
+stateDiagram-v2
+    [*] --> ReceiveURL
+    ReceiveURL --> ClarifyMetadata
+    ClarifyMetadata --> AddNotebook: notebook_manager.py add --url ...
+    AddNotebook --> ActivateNotebook: notebook_manager.py activate --id ...
+    ActivateNotebook --> FirstQuery: ask_question.py initial validation question
+    FirstQuery --> [*]
+```
+
+Good validation questions:
+- "What is this notebook mainly about?"
+- "What kinds of sources appear in this notebook?"
+- "What topics does this notebook cover most directly?"
+
+## Question Strategy
+
+```mermaid
+stateDiagram-v2
+    [*] --> PickQuestionType
+
+    state PickQuestionType <<choice>>
+    PickQuestionType --> Overview: need orientation
+    PickQuestionType --> Extraction: need facts or lists
+    PickQuestionType --> Comparison: need differences
+    PickQuestionType --> Troubleshoot: need source-backed diagnosis
+
+    Overview --> [*]
+    Extraction --> [*]
+    Comparison --> [*]
+    Troubleshoot --> [*]
+```
+
+Prefer questions that are:
+- Specific about the topic, feature, or decision.
+- Narrow enough to answer from one notebook at a time.
+- Explicit about expected output, such as list, summary, steps, or comparison.
+
+Avoid questions that are:
+- "Tell me everything about this notebook."
+- "Solve this entire task for me."
+- "Why did the authors think this way?" when the sources only show what they wrote.
+
+## Anti-Patterns
+
+| Avoid | Better Alternative |
+|-------|--------------------|
+| "Tell me everything." | "List the main sections and what each covers." |
+| "Fix this code." | "What does the notebook say about implementing X?" |
+| "Analyze all notebooks at once." | "Compare notebook A and notebook B on one topic." |
+| "Keep asking until you know everything." | "Ask one follow-up per gap you can name." |
 
 ## Library Organization
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ChooseStrategy
+    [*] --> ChooseScheme
 
-    state ChooseStrategy <<choice>>
-    ChooseStrategy --> ByProject: Organize by project
-    ChooseStrategy --> ByTopic: Organize by topic
-    ChooseStrategy --> ByType: Organize by type
+    state ChooseScheme <<choice>>
+    ChooseScheme --> ByProject
+    ChooseScheme --> ByDomain
+    ChooseScheme --> ByDocType
 
-    state ByProject {
-        [*] --> ProjA_Docs: Project A Docs
-        ProjA_Docs --> ProjA_API: Project A API
-        ProjA_API --> ProjB_Docs: Project B Docs
-        ProjB_Docs --> [*]
-    }
+    ByProject --> SearchProject: notebook_manager.py search --query project-name
+    ByDomain --> SearchDomain: notebook_manager.py search --query auth
+    ByDocType --> SearchType: notebook_manager.py search --query api
 
-    state ByTopic {
-        [*] --> FrontendGuide: frontend, react, css
-        FrontendGuide --> BackendStd: backend, api, rest
-        BackendStd --> DBSchema: database, postgres
-        DBSchema --> [*]
-    }
-
-    state ByType {
-        [*] --> UserDocs: reference, guide
-        UserDocs --> APIRef: api, endpoints
-        APIRef --> ADRs: architecture, decisions
-        ADRs --> [*]
-    }
-
-    ByProject --> [*]
-    ByTopic --> [*]
-    ByType --> [*]
+    SearchProject --> [*]
+    SearchDomain --> [*]
+    SearchType --> [*]
 ```
 
----
+Recommended metadata fields:
+- `name`: short, recognizable notebook label.
+- `description`: what the notebook contains.
+- `topics`: searchable tags for later retrieval.
 
-## Session Management
+## Query Budget Management
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DailyWorkflow
+    [*] --> CheckNeed
 
-    state DailyWorkflow {
-        [*] --> Morning: notebook_manager.py list
-        Morning --> DuringWork: ask_question.py as needed
-        DuringWork --> EndOfDay: No cleanup needed
-        EndOfDay --> [*]
-    }
+    state CheckNeed <<choice>>
+    CheckNeed --> AskNow: notebook answer is required
+    CheckNeed --> ReuseNotes: prior answer already covers it
 
-    DailyWorkflow --> WeeklyMaint
-
-    state WeeklyMaint {
-        [*] --> CheckStale: notebook_manager.py stats
-        CheckStale --> RemoveOld: remove --id nb_old
-        RemoveOld --> CleanTemp: cleanup --preserve-library
-        CleanTemp --> [*]
-    }
-
-    WeeklyMaint --> [*]
+    AskNow --> AskFocused: ask_question.py narrow question
+    AskFocused --> SaveTakeaway: keep useful result locally
+    SaveTakeaway --> [*]
+    ReuseNotes --> [*]
 ```
 
----
+To reduce unnecessary queries:
+- Keep one notebook active when asking several related questions.
+- Save useful answers in local notes instead of re-asking.
+- Split large tasks into named sub-questions.
 
-## Rate Limit Management
+## Security And Local State
 
 ```mermaid
 stateDiagram-v2
-    [*] --> TrackUsage: 50 queries/day
-
-    TrackUsage --> chk1
-    state chk1 <<choice>>
-    chk1 --> BatchQs: Strategy 1: Batch questions
-    chk1 --> UseActive: Strategy 2: Set active notebook once
-    chk1 --> CacheAnswers: Strategy 3: Save important answers
-
-    BatchQs --> SingleQ: Combine 3 questions into 1 comprehensive
-    SingleQ --> [*]
-
-    UseActive --> ActivateOnce: activate --id nb_main
-    ActivateOnce --> QueryNoId: ask_question.py --question (no --notebook-id)
-    QueryNoId --> [*]
-
-    CacheAnswers --> SaveLocal: Save responses to local files
-    SaveLocal --> ReferenceLocal: Read local instead of re-query
-    ReferenceLocal --> [*]
+    [*] --> KeepLocal: data/ stays local
+    KeepLocal --> IgnoreSensitive: do not commit auth or browser state
+    IgnoreSensitive --> UseDedicatedAccount: recommended for automation
+    UseDedicatedAccount --> [*]
 ```
 
----
+Recommended safeguards:
+- Keep `data/`, `.venv/`, and browser state out of version control.
+- Prefer a dedicated Google account for automation workflows.
+- Re-authenticate intentionally rather than sharing one profile across unrelated work.
 
-## Security
+## Agent + Skill Integration
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DataProtection
+    [*] --> UserTask
+    UserTask --> DraftQuestion: agent drafts explicit NotebookLM query
+    DraftQuestion --> QueryNotebook: ask_question.py --question ...
+    QueryNotebook --> ReviewAnswer
 
-    state DataProtection {
-        [*] --> GitIgnore: Never commit data/
-        GitIgnore --> LocalOnly: Library data is local only
-        LocalOnly --> SessionIsolation: Each query is independent
-        SessionIsolation --> [*]
-    }
+    ReviewAnswer --> Decision
+    state Decision <<choice>>
+    Decision --> FollowUp: gap remains
+    Decision --> UseResult: answer is sufficient
 
-    DataProtection --> [*]
-
-    note right of DataProtection
-        .gitignore must include:
-        data/
-        .venv/
-        __pycache__/
-    end note
+    FollowUp --> QueryNotebook
+    UseResult --> FinalResponse: agent writes response or code
+    FinalResponse --> [*]
 ```
 
----
+The skill should be one step in a larger workflow, not the workflow owner.
 
-## Integration
-
-```mermaid
-stateDiagram-v2
-    [*] --> UserAsks: User question
-
-    UserAsks --> CheckNB: Query NotebookLM for internal info
-    CheckNB --> GotInternal: Got notebook answer
-
-    GotInternal --> chk1
-    state chk1 <<choice>>
-    chk1 --> Synthesize: Answer sufficient
-    chk1 --> WebSearch: Need external context
-
-    WebSearch --> GotExternal: Got web results
-    GotExternal --> Synthesize
-
-    Synthesize --> RespondUser: Combine all sources
-    RespondUser --> [*]
-```
-
----
-
-## Performance Optimization
-
-### Query Optimization
-
-**Fast queries:**
-- Specific, focused questions
-- Reference known sections
-- Request specific formats
+## Practical Examples
 
 ```bash
-.\\run.bat ask_question.py \
-  --question "List the three authentication methods from the API reference"
+:: Broad orientation
+.\run.bat ask_question.py --question "Summarize the main topics covered in this notebook."
+
+:: Targeted extraction
+.\run.bat ask_question.py --question "List the authentication methods documented here."
+
+:: Comparison setup
+.\run.bat notebook_manager.py activate --id nb_arch
+.\run.bat ask_question.py --question "What constraints are documented for deployment?"
 ```
 
-**Slower queries:**
-- Open-ended questions
-- Synthesis across documents
-- Complex comparisons
-
-```bash
-.\\run.bat ask_question.py \
-  --question "Analyze the evolution of our architecture decisions"
-```
-
-### Notebook Optimization
-
-**For faster responses:**
-- Upload focused documents (not entire wikis)
-- Remove duplicate content
-- Organize by topic
-- Limit to 50-100 sources per notebook
-
----
-
-## Common Workflows
-
-### Onboarding New Team Member
-
-```bash
-# 1. Add onboarding docs
-.\\run.bat notebook_manager.py add \
-  --url "..." \
-  --name "Engineering Onboarding" \
-  --description "New hire guide and setup instructions" \
-  --topics "onboarding,engineering,setup"
-
-# 2. Answer their questions as they come up
-.\\run.bat ask_question.py \
-  --question "How do I set up the development environment?"
-```
-
-### Pre-Meeting Prep
-
-```bash
-# Query meeting notes from previous sessions
-.\\run.bat ask_question.py \
-  --question "What were the action items from last week's architecture review?"
-```
-
-### Code Review Context
-
-```bash
-# Query architecture docs for context
-.\\run.bat ask_question.py \
-  --question "What are the coding standards for this module?"
-```

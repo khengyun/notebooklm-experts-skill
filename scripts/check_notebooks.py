@@ -23,6 +23,14 @@ from config import (
 from browser_utils import BrowserFactory
 from auth_manager import AuthManager
 from notebook_manager import NotebookLibrary
+from runtime_logging import (
+    configure_runtime,
+    debug,
+    expect,
+    extract_runtime_flags,
+    runtime_options_help,
+    step,
+)
 
 
 class NotebookValidator:
@@ -36,6 +44,7 @@ class NotebookValidator:
 
     def validate_all(self):
         """Validate all notebooks in the library"""
+        step("Validate all registered notebook links")
         notebooks = self.library.notebooks
         if not notebooks:
             print("No notebooks in library to validate.")
@@ -46,7 +55,7 @@ class NotebookValidator:
         # Check authentication first
         if not self.auth.is_authenticated():
             print("Warning: valid authentication not found. Validation may fail.")
-            print("Run 'python scripts/auth_manager.py' to login first.")
+            print("Run '.\\run.bat auth_manager.py setup' to login first.")
             # Continue anyway as some notebooks might be public (though rare for NotebookLM)
             # Actually, NotebookLM usually requires login even for shared ones.
             response = input("Continue without verified auth? (y/n): ")
@@ -65,6 +74,7 @@ class NotebookValidator:
             
             # Check if logged in by visiting home
             print("Verifying session...")
+            expect("NotebookLM home should open without redirecting to Google login")
             page.goto("https://notebooklm.google.com/")
             time.sleep(3)
             
@@ -93,6 +103,7 @@ class NotebookValidator:
             return
 
         print(f"Checking: {name} ({url})...", end='', flush=True)
+        debug(f"Validating notebook id={notebook_id}")
         
         try:
             response = page.goto(url, wait_until="domcontentloaded")
@@ -201,9 +212,13 @@ if __name__ == "__main__":
     import argparse
     from datetime import datetime
 
+    runtime_opts, argv = extract_runtime_flags(sys.argv[1:])
+    configure_runtime("check_notebooks", **runtime_opts)
+
     parser = argparse.ArgumentParser(description='Validate notebook links')
+    parser.epilog = runtime_options_help()
     parser.add_argument('--profile', help='Profile to use (default: active)')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     validator = NotebookValidator(profile_id=getattr(args, 'profile', None))
     validator.validate_all()

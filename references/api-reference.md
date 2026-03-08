@@ -1,20 +1,22 @@
 ﻿---
 name: notebooklm
 version: 1.0.0
-description: Detailed API reference for all notebooklm scripts
+description: CLI and script reference for NotebookLM skill operations
 ---
 
 # API Reference
+
+This file is the command and script reference for the NotebookLM skill. Use it to check supported commands, parameters, and storage layout.
 
 ## Overview
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> AuthManager: First time setup
-    AuthManager --> NotebookMgr: Authenticated
-    NotebookMgr --> AskQuestion: Notebooks ready
-    AskQuestion --> CleanupMgr: Maintenance
+    [*] --> AuthManager: authenticate profile
+    AuthManager --> NotebookMgr: manage local library
+    NotebookMgr --> AskQuestion: query notebook
+    AskQuestion --> CleanupMgr: optional maintenance
     CleanupMgr --> [*]
 ```
 
@@ -22,247 +24,270 @@ stateDiagram-v2
 
 ## Authentication Manager (`auth_manager.py`)
 
+Use this script to create, validate, switch, clear, and delete local auth profiles.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> Unauthenticated
+    [*] --> NoProfile
 
-    Unauthenticated --> BrowserOpen: setup
-    BrowserOpen --> WaitLogin: Chrome opens visible
-    WaitLogin --> Authenticated: User completes Google login
+    NoProfile --> Setup: setup --name
+    Setup --> Authenticated: user logs in
 
-    Authenticated --> chk1
-    state chk1 <<choice>>
-    chk1 --> Authenticated: status = valid
-    chk1 --> SessionExpired: status = expired
+    Authenticated --> Status: status
+    Authenticated --> Validate: validate
+    Authenticated --> Reauth: reauth
+    Authenticated --> Clear: clear
+    Authenticated --> ListProfiles: list
+    Authenticated --> SetActive: set-active --id
+    Authenticated --> DeleteProfile: delete --id
 
-    SessionExpired --> BrowserOpen: reauth
-
-    Authenticated --> Cleared: clear
-    Cleared --> Unauthenticated
-
-    Authenticated --> [*]
-
-    note right of BrowserOpen
-        MUST be visible browser
-        Never headless
-    end note
-
-    note left of Authenticated
-        Saved to
-        data/browser_state/
-    end note
+    Clear --> NoProfile
+    DeleteProfile --> NoProfile
+    Reauth --> Authenticated
 ```
 
-```bash
-.\run.bat auth_manager.py setup    # First time / new account
-.\run.bat auth_manager.py status   # Check session
-.\run.bat auth_manager.py reauth   # Refresh expired session
-.\run.bat auth_manager.py clear    # Remove all auth data
+### Common commands
+
+```bat
+.\run.bat auth_manager.py setup --name "Work Account"
+.\run.bat auth_manager.py setup --profile work-account
+.\run.bat auth_manager.py status
+.\run.bat auth_manager.py status --profile work-account
+.\run.bat auth_manager.py validate --profile work-account
+.\run.bat auth_manager.py reauth --profile work-account
+.\run.bat auth_manager.py clear --profile work-account
+.\run.bat auth_manager.py list
+.\run.bat auth_manager.py set-active --id work-account
+.\run.bat auth_manager.py delete --id old-account
 ```
+
+### Supported commands
+
+| Command | Key arguments | Notes |
+|---------|---------------|-------|
+| `setup` | `--name`, `--profile`, `--headless`, `--timeout` | `--name` creates a new profile before login |
+| `status` | `--profile` | Shows auth state and state file |
+| `validate` | `--profile` | Checks whether auth still works |
+| `clear` | `--profile` | Removes auth data for a profile |
+| `reauth` | `--profile`, `--timeout` | Clears and re-runs auth |
+| `list` | none | Lists all profiles |
+| `set-active` | `--id` | Switches the active profile |
+| `delete` | `--id` | Deletes a profile |
+
+### Notes
+
+- Interactive login should normally be visible to the user.
+- Auth state is stored per profile under `data/profiles/<id>/`.
+- `status` and `validate` default to the active profile when `--profile` is omitted.
 
 ---
 
 ## Notebook Manager (`notebook_manager.py`)
 
+Use this script to manage the local notebook library for the active profile or a specific profile.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> EmptyLib
+    [*] --> EmptyLibrary
 
-    EmptyLib --> HasNotebooks: add --url --name --description --topics
+    EmptyLibrary --> AddNotebook: add --url
+    AddNotebook --> HasNotebooks
 
     state HasNotebooks {
-        [*] --> Registered
-        Registered --> Listed: list
-        Registered --> SearchResult: search --query
-        Registered --> ActiveNB: activate --id
-        ActiveNB --> ReadyToQuery
+        [*] --> Listed
+        Listed --> Search: search --query
+        Listed --> Activate: activate --id
+        Listed --> Remove: remove --id
+        Listed --> Stats: stats
+        Listed --> Export: export
+        Listed --> Import: import
+        Listed --> AddSource: add-source
     }
 
-    HasNotebooks --> HasNotebooks: add more notebooks
-    HasNotebooks --> chk1
-    state chk1 <<choice>>
-    chk1 --> EmptyLib: remove last notebook
-    chk1 --> HasNotebooks: remove, others remain
-
-    HasNotebooks --> [*]: stats
+    Remove --> HasNotebooks
+    AddSource --> HasNotebooks
+    Import --> HasNotebooks
+    Export --> HasNotebooks
 ```
 
-```bash
-.\run.bat notebook_manager.py add --url URL --name NAME --description DESC --topics TAGS
+### Common commands
+
+```bat
 .\run.bat notebook_manager.py list
-.\run.bat notebook_manager.py search --query KEYWORD
-.\run.bat notebook_manager.py activate --id ID
-.\run.bat notebook_manager.py remove --id ID
+.\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/..."
+.\run.bat notebook_manager.py add --url URL --name NAME --description DESC --topics "topic1,topic2"
+.\run.bat notebook_manager.py search --query auth
+.\run.bat notebook_manager.py activate --id notebook-id
+.\run.bat notebook_manager.py remove --id notebook-id
 .\run.bat notebook_manager.py stats
+.\run.bat notebook_manager.py export --format json
+.\run.bat notebook_manager.py import --file backup.json --strategy merge
+.\run.bat notebook_manager.py add-source --notebook-url URL --source-url https://example.com
 ```
 
-| Parameter | Required | Example |
-|-----------|----------|---------|
-| `--url` | Yes | `https://notebooklm.google.com/notebook/...` |
-| `--name` | Yes | `"API Documentation"` |
-| `--description` | Yes | `"Complete REST API docs"` |
-| `--topics` | Yes | `"api,rest,docs"` |
+### Supported commands
+
+| Command | Key arguments | Notes |
+|---------|---------------|-------|
+| `add` | `--url` required | `--name`, `--description`, and `--topics` are optional; metadata can be inferred unless `--no-fetch` is used |
+| `list` | none | Lists notebooks in the current profile library |
+| `search` | `--query` | Searches notebook metadata |
+| `activate` | `--id` | Sets the active notebook |
+| `remove` | `--id` | Removes a notebook from the library |
+| `stats` | none | Shows library stats |
+| `export` | `--format`, `--output` | Exports library as JSON or CSV |
+| `import` | `--file`, `--strategy` | Imports library from JSON or CSV |
+| `add-source` | `--notebook-url`, `--source-url`, `--no-headless` | Opens browser automation to add a web or YouTube source |
+
+### `add` parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `--url` | Yes | NotebookLM notebook URL |
+| `--name` | No | Display name; auto-detected if omitted |
+| `--description` | No | Description; auto-generated if omitted |
+| `--topics` | No | Comma-separated topics; auto-detected if omitted |
+| `--use-cases` | No | Comma-separated use cases |
+| `--tags` | No | Comma-separated tags |
+| `--no-fetch` | No | Skip metadata detection from the notebook page |
+
+### Notes
+
+- Notebook data is stored per profile in `data/profiles/<id>/library.json`.
+- `activate` changes the default notebook used by `ask_question.py` when no notebook is passed explicitly.
+- `add-source` updates NotebookLM through browser automation; it is still part of local library workflow, not a separate ingestion service.
 
 ---
 
 ## Question Interface (`ask_question.py`)
 
+Use this script to send one explicit question to NotebookLM or refresh a stored notebook name.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> SelectNB
+    [*] --> ResolveNotebook
 
-    state SelectNB <<choice>>
-    SelectNB --> UseActive: no --notebook-id/url
-    SelectNB --> UseById: --notebook-id ID
-    SelectNB --> UseByUrl: --notebook-url URL
+    state ResolveNotebook <<choice>>
+    ResolveNotebook --> ActiveNotebook: no notebook arg
+    ResolveNotebook --> NotebookId: --notebook-id
+    ResolveNotebook --> NotebookUrl: --notebook-url
 
-    UseActive --> SendQuery
-    UseById --> SendQuery
-    UseByUrl --> SendQuery
+    ActiveNotebook --> Ask
+    NotebookId --> Ask
+    NotebookUrl --> Ask
 
-    SendQuery --> WaitResponse: Submit question
-    WaitResponse --> GotAnswer
+    ActiveNotebook --> RefreshName: --refresh-name-only
+    NotebookId --> RefreshName
+    NotebookUrl --> RefreshName
 
-    GotAnswer --> chk1
-    state chk1 <<choice>>
-    chk1 --> FollowUp: Needs more detail
-    chk1 --> Complete: Answer sufficient
-
-    FollowUp --> SendQuery: Ask follow-up
-    Complete --> [*]
-
-    note right of SendQuery
-        --show-browser for debug
-    end note
+    Ask --> Answer
+    RefreshName --> [*]
+    Answer --> [*]
 ```
 
-```bash
-.\run.bat ask_question.py --question "..."                          # Active notebook
-.\run.bat ask_question.py --question "..." --notebook-id nb_abc123  # By ID
-.\run.bat ask_question.py --question "..." --notebook-url URL       # By URL
-.\run.bat ask_question.py --question "..." --show-browser           # Debug mode
+### Common commands
+
+```bat
+.\run.bat ask_question.py --question "..."
+.\run.bat ask_question.py --question "..." --notebook-id notebook-id
+.\run.bat ask_question.py --question "..." --notebook-url "https://notebooklm.google.com/notebook/..."
+.\run.bat ask_question.py --question "..." --profile work-account
+.\run.bat ask_question.py --question "..." --show-browser
+.\run.bat ask_question.py --notebook-id notebook-id --refresh-name-only
 ```
+
+### Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `--question` | Yes | Question to ask |
-| `--notebook-id` | No* | Notebook ID from library |
-| `--notebook-url` | No* | Direct notebook URL |
+| `--question` | Yes, unless `--refresh-name-only` is used | Question to ask |
+| `--notebook-id` | No | Notebook ID from the local library |
+| `--notebook-url` | No | Direct NotebookLM URL |
+| `--profile` | No | Profile to use; defaults to active |
 | `--show-browser` | No | Show browser window |
+| `--refresh-name-only` | No | Open the notebook and update its stored name without sending a question |
+
+### Notes
+
+- If no notebook is supplied, the script uses the active notebook.
+- If no active notebook exists, the script lists known notebooks and exits with an error.
+- Each question opens a new browser session.
 
 ---
 
 ## Cleanup Manager (`cleanup_manager.py`)
 
-```mermaid
-stateDiagram-v2
-    [*] --> Preview: cleanup_manager.py
-
-    Preview --> chk1
-    state chk1 <<choice>>
-    chk1 --> FullClean: --confirm
-    chk1 --> SafeClean: --preserve-library
-
-    state FullClean {
-        [*] --> RmCache
-        RmCache --> RmTranscripts
-        RmTranscripts --> RmAuth
-        RmAuth --> RmLibrary
-        RmLibrary --> [*]
-    }
-
-    state SafeClean {
-        [*] --> CleanCache
-        CleanCache --> CleanTranscripts
-        CleanTranscripts --> CleanTemp
-        CleanTemp --> [*]
-    }
-
-    FullClean --> [*]
-    SafeClean --> [*]
-
-    note right of SafeClean
-        Keeps: notebooks + auth
-        Removes: cache, temp, transcripts
-    end note
-```
-
-```bash
-.\run.bat cleanup_manager.py                    # Preview
-.\run.bat cleanup_manager.py --confirm          # Full cleanup
-.\run.bat cleanup_manager.py --preserve-library # Keep notebooks + auth
-```
-
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Authentication required |
-| 3 | Notebook not found |
-| 4 | Network error |
-| 5 | Rate limit exceeded |
-
----
-
-## Data File Structure
-
-### `<skill-dir>/data/library.json`
-
-```json
-{
-  "notebooks": [
-    {
-      "id": "nb_abc123",
-      "name": "API Documentation",
-      "description": "Complete REST API docs for v2.0",
-      "topics": ["api", "rest", "documentation"],
-      "url": "https://notebooklm.google.com/notebook/...",
-      "added_at": "2024-01-10T12:00:00Z",
-      "last_accessed": "2024-01-15T08:30:00Z"
-    }
-  ],
-  "active_notebook_id": "nb_abc123",
-  "version": "1.0.0"
-}
-```
-
-### `<skill-dir>/data/auth_info.json`
-
-```json
-{
-  "authenticated": true,
-  "email": "user@example.com",
-  "session_expires": "2024-01-20T00:00:00Z",
-  "last_verified": "2024-01-15T10:00:00Z"
-}
-```
-
----
-
-## Module Classes
+Use this script to preview or remove local runtime data.
 
 ```mermaid
 stateDiagram-v2
-    state NotebookLibrary {
-        [*] --> nb_add: add_notebook
-        nb_add --> nb_list: list_notebooks
-        nb_list --> nb_search: search_notebooks
-        nb_search --> nb_get: get_notebook
-        nb_get --> nb_activate: activate_notebook
-        nb_activate --> nb_remove: remove_notebook
-        nb_remove --> [*]
-    }
-
-    state AuthMgr {
-        [*] --> is_auth: is_authenticated
-        is_auth --> setup: setup_auth
-        setup --> get_info: get_auth_info
-        get_info --> validate: validate_auth
-        validate --> clear: clear_auth
-        clear --> [*]
-    }
+    [*] --> Preview
+    Preview --> FullCleanup: --confirm
+    Preview --> PreserveLibrary: --preserve-library
+    FullCleanup --> [*]
+    PreserveLibrary --> [*]
 ```
+
+### Common commands
+
+```bat
+.\run.bat cleanup_manager.py
+.\run.bat cleanup_manager.py --confirm
+.\run.bat cleanup_manager.py --preserve-library
+```
+
+### Notes
+
+- Cleanup is profile-aware internally.
+- `--preserve-library` keeps notebook metadata while removing temporary runtime data.
+- `.venv/` is never deleted by cleanup.
+
+---
+
+## Data Layout
+
+Current runtime data is stored under `data/`:
+
+```text
+<data-dir>/profiles.json
+<data-dir>/profiles/<id>/library.json
+<data-dir>/profiles/<id>/auth_info.json
+<data-dir>/profiles/<id>/browser_state/
+```
+
+Legacy flat-layout files may still appear during migration, but profile-aware storage is the current layout.
+
+---
+
+## Module Reference
+
+### `NotebookLibrary`
+
+Key methods:
+
+- `add_notebook`
+- `list_notebooks`
+- `search_notebooks`
+- `get_notebook`
+- `select_notebook`
+- `get_active_notebook`
+- `remove_notebook`
+- `export_notebooks`
+- `import_notebooks`
+
+### `AuthManager`
+
+Key methods:
+
+- `is_authenticated`
+- `get_auth_info`
+- `setup_auth`
+- `validate_auth`
+- `clear_auth`
+- `re_auth`
+
+---
+
+## Exit Behavior
+
+Most scripts return `0` on success and `1` on general failure. Some wrapper-level interruptions may return different shell exit codes, so rely on command output rather than a custom per-script exit code matrix.
