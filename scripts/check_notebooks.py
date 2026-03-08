@@ -20,12 +20,13 @@ from config import (
     LOGIN_TIMEOUT_MINUTES,
     USER_AGENT
 )
-from browser_utils import BrowserFactory
+from browser_utils import BrowserFactory, find_first_visible_selector
 from auth_manager import AuthManager
 from notebook_manager import NotebookLibrary
 from runtime_logging import (
     configure_runtime,
     debug,
+    debug_kv,
     expect,
     extract_runtime_flags,
     runtime_options_help,
@@ -119,11 +120,15 @@ class NotebookValidator:
             reason = "Unknown"
             
             # Case 1: Success - Input box is present
-            for selector in QUERY_INPUT_SELECTORS:
-                if page.is_visible(selector):
-                    is_active = True
-                    reason = "Accessible"
-                    break
+            selector, _ = find_first_visible_selector(
+                page,
+                QUERY_INPUT_SELECTORS,
+                context=f"check_notebooks.query_input.{notebook_id}",
+            )
+            if selector:
+                is_active = True
+                reason = "Accessible"
+                debug_kv("check_notebooks.accessible", notebook_id=notebook_id, selector=selector)
 
             # Extract real title from page when accessible
             detected_title = None

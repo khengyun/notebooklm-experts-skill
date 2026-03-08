@@ -30,6 +30,19 @@ RESPONSE_SELECTORS = [
     "[data-message-author='assistant']",
 ]
 
+SOURCE_PANEL_EXPAND_SELECTORS = [
+    'button[aria-label="Mở rộng bảng điều khiển nguồn"]',
+    'button[aria-label="Expand source panel"]',
+    'button[aria-label*="Nút xem nguồn"]',
+    'button[aria-label="Nút xem nguồn"]',
+    'button[aria-label*="View sources"]',
+]
+
+SOURCE_PANEL_ITEM_SELECTORS = [
+    'source-picker input[aria-label]',
+    'source-picker div[aria-label]',
+]
+
 # Browser Configuration
 BROWSER_ARGS = [
     '--disable-blink-features=AutomationControlled',  # Patches navigator.webdriver

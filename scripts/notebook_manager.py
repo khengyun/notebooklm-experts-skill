@@ -16,6 +16,7 @@ from datetime import datetime
 
 from runtime_logging import (
     configure_runtime,
+    debug,
     debug_kv,
     expect,
     extract_runtime_flags,
@@ -41,9 +42,9 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
         Dict with 'title' (str or None) and 'sources' (list of source name strings)
     """
     from patchright.sync_api import sync_playwright
-    from browser_utils import BrowserFactory
+    from browser_utils import BrowserFactory, StealthUtils, find_first_visible_selector, log_selector_attempt
     from auth_manager import AuthManager
-    from config import QUERY_INPUT_SELECTORS
+    from config import QUERY_INPUT_SELECTORS, SOURCE_PANEL_EXPAND_SELECTORS, SOURCE_PANEL_ITEM_SELECTORS
 
     step("Fetch notebook metadata from live NotebookLM page")
     auth = AuthManager(profile_id=profile_id)
@@ -73,14 +74,14 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
         page.wait_for_timeout(5000)
 
         # Check accessibility
-        is_ready = False
-        for sel in QUERY_INPUT_SELECTORS:
-            try:
-                if page.is_visible(sel):
-                    is_ready = True
-                    break
-            except Exception:
-                continue
+        ready_selector, _ = find_first_visible_selector(
+            page,
+            QUERY_INPUT_SELECTORS,
+            context="metadata.query_input_ready",
+        )
+        is_ready = bool(ready_selector)
+        if ready_selector:
+            debug_kv("metadata.query_input", selector=ready_selector)
 
         if not is_ready:
             print("  Warning: Notebook may not be accessible")
@@ -98,56 +99,81 @@ def fetch_notebook_metadata(url: str, profile_id=None, headless: bool = True) ->
         sources = []
 
         # Click "Expand source panel" button to load full source list
-        expand_btns = [
-            'button[aria-label="Mở rộng bảng điều khiển nguồn"]',
-            'button[aria-label="Expand source panel"]',
-            'button[aria-label*="Nút xem nguồn"]',
-            'button[aria-label="Nút xem nguồn"]',
-            'button[aria-label*="View sources"]',
-        ]
-        clicked_expand = False
-        for btn_sel in expand_btns:
-            try:
-                if page.is_visible(btn_sel):
-                    page.click(btn_sel)
-                    page.wait_for_timeout(3000)
-                    clicked_expand = True
-                    print(f"  Clicked expand btn: {btn_sel}")
-                    break
-            except Exception:
-                continue
-        if not clicked_expand:
+        expand_selector, _ = find_first_visible_selector(
+            page,
+            SOURCE_PANEL_EXPAND_SELECTORS,
+            context="metadata.expand_sources",
+        )
+        if expand_selector:
+            clicked_selector = StealthUtils.realistic_click(
+                page,
+                expand_selector,
+                context="metadata.expand_sources.click",
+            )
+            if not clicked_selector:
+                print(f"  Warning: Could not click expand sources button: {expand_selector}")
+            else:
+                print(f"  Clicked expand btn: {clicked_selector}")
+            page.wait_for_timeout(3000)
+        else:
             print("  Could not find expand sources button")
 
         # Extract source names from aria-labels on source checkbox inputs
         # These are populated after the sources panel is expanded
         exclude_labels = {'Chọn tất cả các nguồn', 'Select all sources'}
-        try:
-            inputs = page.query_selector_all('source-picker input[aria-label]')
-            for el in inputs:
-                lbl = el.get_attribute('aria-label')
+        debug_kv(
+            "selector.scan",
+            context="metadata.source_items",
+            action="query_selector_all",
+            selector_count=len(SOURCE_PANEL_ITEM_SELECTORS),
+        )
+        for sel in SOURCE_PANEL_ITEM_SELECTORS:
+            log_selector_attempt("metadata.source_items", sel, action="query_selector_all")
+            try:
+                elements = page.query_selector_all(sel)
+            except Exception as exc:
+                log_selector_attempt(
+                    "metadata.source_items",
+                    sel,
+                    action="query_selector_all",
+                    success=False,
+                    reason=str(exc) or type(exc).__name__,
+                )
+                continue
+
+            if not elements:
+                log_selector_attempt(
+                    "metadata.source_items",
+                    sel,
+                    action="query_selector_all",
+                    success=False,
+                    reason="no_elements",
+                )
+                continue
+
+            added = 0
+            for el in elements:
+                try:
+                    lbl = el.get_attribute('aria-label')
+                except Exception as exc:
+                    debug(f"Skipping source label read failure for {sel}: {exc}")
+                    continue
                 if lbl and lbl not in exclude_labels and lbl not in sources:
                     sources.append(lbl)
-        except Exception:
-            pass
+                    added += 1
 
-        # Fallback selectors if source-picker inputs didn't work
-        if not sources:
-            source_selectors = [
-                'source-picker div[aria-label]',
-            ]
-            for sel in source_selectors:
-                try:
-                    elements = page.query_selector_all(sel)
-                    if elements:
-                        for el in elements:
-                            lbl = el.get_attribute('aria-label')
-                            if lbl and lbl not in exclude_labels and lbl not in sources:
-                                sources.append(lbl)
-                        if sources:
-                            break
-                except Exception:
-                    continue
+            log_selector_attempt(
+                "metadata.source_items",
+                sel,
+                action="query_selector_all",
+                success=added > 0,
+                reason="labels_extracted" if added > 0 else "labels_filtered_or_empty",
+                element_count=len(elements),
+                added_count=added,
+            )
+
+            if sources:
+                break
 
         print(f"  Title: {title or '(not found)'}")
         if sources:

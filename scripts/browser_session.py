@@ -11,7 +11,9 @@ from patchright.sync_api import BrowserContext, Page
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from browser_utils import StealthUtils
+from browser_utils import StealthUtils, get_latest_text_from_selectors, wait_for_first_selector
+from config import QUERY_INPUT_SELECTORS, RESPONSE_SELECTORS
+from runtime_logging import debug_kv
 
 
 class BrowserSession:
@@ -73,12 +75,15 @@ class BrowserSession:
 
     def _wait_for_ready(self):
         """Wait for NotebookLM page to be ready"""
-        try:
-            # Wait for chat input
-            self.page.wait_for_selector("textarea.query-box-input", timeout=10000, state="visible")
-        except Exception:
-            # Try alternative selector
-            self.page.wait_for_selector('textarea[aria-label="Feld für Anfragen"]', timeout=5000, state="visible")
+        element, selector = wait_for_first_selector(
+            self.page,
+            QUERY_INPUT_SELECTORS,
+            context=f"browser_session.ready.{self.id}",
+            timeout=10000,
+            state="visible",
+        )
+        if not element or not selector:
+            raise TimeoutError("NotebookLM query input did not become ready")
 
     def ask(self, question: str) -> Dict[str, Any]:
         """
@@ -100,16 +105,37 @@ class BrowserSession:
             previous_answer = self._snapshot_latest_response()
 
             # Find chat input
-            chat_input_selector = "textarea.query-box-input"
-            try:
-                self.page.wait_for_selector(chat_input_selector, timeout=5000, state="visible")
-            except Exception:
-                chat_input_selector = 'textarea[aria-label="Feld für Anfragen"]'
-                self.page.wait_for_selector(chat_input_selector, timeout=5000, state="visible")
+            _, chat_input_selector = wait_for_first_selector(
+                self.page,
+                QUERY_INPUT_SELECTORS,
+                context=f"browser_session.ask_input.{self.id}",
+                timeout=5000,
+                state="visible",
+            )
+            if not chat_input_selector:
+                raise TimeoutError("NotebookLM query input not found for session ask")
 
             # Click and type with human-like behavior
-            self.stealth.realistic_click(self.page, chat_input_selector)
-            self.stealth.human_type(self.page, chat_input_selector, question)
+            clicked_selector = self.stealth.realistic_click(
+                self.page,
+                chat_input_selector,
+                context=f"browser_session.click_input.{self.id}",
+            )
+            typed_selector = self.stealth.human_type(
+                self.page,
+                chat_input_selector,
+                question,
+                context=f"browser_session.type_input.{self.id}",
+            )
+            if not clicked_selector:
+                debug_kv(
+                    "browser_session.input_click",
+                    session_id=self.id,
+                    selector=chat_input_selector,
+                    success=False,
+                )
+            if not typed_selector:
+                raise TimeoutError("Could not type into NotebookLM query input")
 
             # Small pause before submit
             self.stealth.random_delay(300, 800)
@@ -148,22 +174,29 @@ class BrowserSession:
 
     def _snapshot_latest_response(self) -> Optional[str]:
         """Get the current latest response text"""
-        try:
-            # Use correct NotebookLM selector
-            responses = self.page.query_selector_all(".to-user-container .message-text-content")
-            if responses:
-                return responses[-1].inner_text()
-        except Exception:
-            pass
-        return None
+        text, _ = get_latest_text_from_selectors(
+            self.page,
+            RESPONSE_SELECTORS,
+            context=f"browser_session.snapshot.{self.id}",
+        )
+        return text
 
     def _wait_for_latest_answer(self, previous_answer: Optional[str], timeout: int = 120) -> str:
         """Wait for and extract the new answer"""
         start_time = time.time()
         last_candidate = None
         stable_count = 0
+        poll_count = 0
 
         while time.time() - start_time < timeout:
+            poll_count += 1
+            debug_kv(
+                "browser_session.response.poll",
+                session_id=self.id,
+                poll=poll_count,
+                remaining_seconds=max(0, int(timeout - (time.time() - start_time))),
+            )
+
             # Check if NotebookLM is still thinking (most reliable indicator)
             try:
                 thinking_element = self.page.query_selector('div.thinking-message')
@@ -173,26 +206,35 @@ class BrowserSession:
             except Exception:
                 pass
 
-            try:
-                # Use correct NotebookLM selector
-                responses = self.page.query_selector_all(".to-user-container .message-text-content")
+            latest_text, response_selector = get_latest_text_from_selectors(
+                self.page,
+                RESPONSE_SELECTORS,
+                context=f"browser_session.response.{self.id}.{poll_count}",
+            )
 
-                if responses:
-                    latest_text = responses[-1].inner_text().strip()
-
-                    # Check if it's a new response
-                    if latest_text and latest_text != previous_answer:
-                        # Check if text is stable (3 consecutive polls)
-                        if latest_text == last_candidate:
-                            stable_count += 1
-                            if stable_count >= 3:
-                                return latest_text
-                        else:
-                            stable_count = 1
-                            last_candidate = latest_text
-
-            except Exception:
-                pass
+            if latest_text and latest_text != previous_answer:
+                if latest_text == last_candidate:
+                    stable_count += 1
+                    debug_kv(
+                        "browser_session.response.stability",
+                        session_id=self.id,
+                        poll=poll_count,
+                        selector=response_selector,
+                        stable_count=stable_count,
+                        text_length=len(latest_text),
+                    )
+                    if stable_count >= 3:
+                        return latest_text
+                else:
+                    stable_count = 1
+                    last_candidate = latest_text
+                    debug_kv(
+                        "browser_session.response.new_text",
+                        session_id=self.id,
+                        poll=poll_count,
+                        selector=response_selector,
+                        text_length=len(latest_text),
+                    )
 
             time.sleep(0.5)
 

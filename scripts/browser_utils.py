@@ -4,11 +4,253 @@ import json
 import time
 import random
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Sequence, Tuple, Union
 
 from patchright.sync_api import Playwright, BrowserContext, Page
-from config import BROWSER_ARGS, USER_AGENT
-from runtime_logging import expect, log_exception, step
+from config import BROWSER_ARGS, QUERY_INPUT_SELECTORS, USER_AGENT
+from runtime_logging import debug, debug_kv, expect, log_exception, step
+
+
+SelectorTarget = Union[str, Sequence[str]]
+
+
+def _selector_reason(exc: Optional[BaseException]) -> str:
+    """Return a short reason string for selector failures."""
+    if exc is None:
+        return "unknown"
+
+    message = str(exc).strip()
+    return message or type(exc).__name__
+
+
+def log_selector_attempt(
+    context: str,
+    selector: str,
+    *,
+    action: str,
+    success: Optional[bool] = None,
+    reason: Optional[str] = None,
+    **extra,
+) -> None:
+    """Emit a structured selector attempt or result line through debug logging."""
+    payload = {
+        "context": context,
+        "selector": selector,
+        "action": action,
+    }
+    payload.update(extra)
+
+    if success is None:
+        debug_kv("selector.attempt", **payload)
+        return
+
+    payload["success"] = success
+    if reason is not None:
+        payload["reason"] = reason
+    debug_kv("selector.result", **payload)
+
+
+def wait_for_first_selector(
+    page: Page,
+    selectors: Sequence[str],
+    *,
+    context: str,
+    timeout: int = 10000,
+    state: str = "visible",
+) -> Tuple[Optional[object], Optional[str]]:
+    """Wait for the first selector that resolves successfully."""
+    debug_kv(
+        "selector.scan",
+        context=context,
+        action="wait_for_selector",
+        selector_count=len(selectors),
+        timeout=timeout,
+        state=state,
+    )
+
+    for selector in selectors:
+        log_selector_attempt(
+            context,
+            selector,
+            action="wait_for_selector",
+            timeout=timeout,
+            state=state,
+        )
+        try:
+            element = page.wait_for_selector(selector, timeout=timeout, state=state)
+        except Exception as exc:
+            log_selector_attempt(
+                context,
+                selector,
+                action="wait_for_selector",
+                success=False,
+                reason=_selector_reason(exc),
+                timeout=timeout,
+                state=state,
+            )
+            continue
+
+        if not element:
+            log_selector_attempt(
+                context,
+                selector,
+                action="wait_for_selector",
+                success=False,
+                reason="missing",
+                timeout=timeout,
+                state=state,
+            )
+            continue
+
+        log_selector_attempt(
+            context,
+            selector,
+            action="wait_for_selector",
+            success=True,
+            reason="matched",
+            timeout=timeout,
+            state=state,
+        )
+        return element, selector
+
+    return None, None
+
+
+def find_first_visible_selector(
+    page: Page,
+    selectors: Sequence[str],
+    *,
+    context: str,
+) -> Tuple[Optional[str], Optional[object]]:
+    """Return the first visible selector and element from a selector list."""
+    debug_kv(
+        "selector.scan",
+        context=context,
+        action="is_visible",
+        selector_count=len(selectors),
+    )
+
+    for selector in selectors:
+        log_selector_attempt(context, selector, action="is_visible")
+        try:
+            visible = page.is_visible(selector)
+        except Exception as exc:
+            log_selector_attempt(
+                context,
+                selector,
+                action="is_visible",
+                success=False,
+                reason=_selector_reason(exc),
+            )
+            continue
+
+        if not visible:
+            log_selector_attempt(
+                context,
+                selector,
+                action="is_visible",
+                success=False,
+                reason="not_visible",
+            )
+            continue
+
+        element = page.query_selector(selector)
+        if not element:
+            log_selector_attempt(
+                context,
+                selector,
+                action="query_selector",
+                success=False,
+                reason="missing_after_visible",
+            )
+            continue
+
+        log_selector_attempt(
+            context,
+            selector,
+            action="is_visible",
+            success=True,
+            reason="visible",
+        )
+        return selector, element
+
+    return None, None
+
+
+def get_latest_text_from_selectors(
+    page: Page,
+    selectors: Sequence[str],
+    *,
+    context: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Read the latest non-empty text from the first selector that yields content."""
+    debug_kv(
+        "selector.scan",
+        context=context,
+        action="query_selector_all",
+        selector_count=len(selectors),
+    )
+
+    for selector in selectors:
+        log_selector_attempt(context, selector, action="query_selector_all")
+        try:
+            elements = page.query_selector_all(selector)
+        except Exception as exc:
+            log_selector_attempt(
+                context,
+                selector,
+                action="query_selector_all",
+                success=False,
+                reason=_selector_reason(exc),
+            )
+            continue
+
+        if not elements:
+            log_selector_attempt(
+                context,
+                selector,
+                action="query_selector_all",
+                success=False,
+                reason="no_elements",
+            )
+            continue
+
+        try:
+            text = elements[-1].inner_text().strip()
+        except Exception as exc:
+            log_selector_attempt(
+                context,
+                selector,
+                action="inner_text",
+                success=False,
+                reason=_selector_reason(exc),
+                element_count=len(elements),
+            )
+            continue
+
+        if not text:
+            log_selector_attempt(
+                context,
+                selector,
+                action="inner_text",
+                success=False,
+                reason="empty_text",
+                element_count=len(elements),
+            )
+            continue
+
+        log_selector_attempt(
+            context,
+            selector,
+            action="inner_text",
+            success=True,
+            reason="matched_text",
+            element_count=len(elements),
+            text_length=len(text),
+        )
+        return text, selector
+
+    return None, None
 
 
 class BrowserFactory:
@@ -79,35 +321,111 @@ class StealthUtils:
         time.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
 
     @staticmethod
-    def human_type(page: Page, selector: str, text: str, wpm_min: int = 320, wpm_max: int = 480):
-        """Type with human-like speed"""
-        element = page.query_selector(selector)
-        if not element:
-            # Try waiting if not immediately found
-            try:
-                element = page.wait_for_selector(selector, timeout=2000)
-            except:
-                pass
+    def random_mouse_movement(page: Page):
+        """Perform a small amount of movement to avoid robotic interactions."""
+        width = 1280
+        height = 720
+        try:
+            viewport = page.viewport_size or {}
+            width = viewport.get("width", width)
+            height = viewport.get("height", height)
+        except Exception:
+            pass
 
-        if not element:
+        x = random.randint(max(1, width // 5), max(2, (width * 4) // 5))
+        y = random.randint(max(1, height // 5), max(2, (height * 4) // 5))
+        page.mouse.move(x, y, steps=random.randint(3, 7))
+
+    @staticmethod
+    def human_type(
+        page: Page,
+        selector: SelectorTarget,
+        text: str,
+        wpm_min: int = 320,
+        wpm_max: int = 480,
+        *,
+        context: str = "human_type",
+    ) -> Optional[str]:
+        """Type with human-like speed and return the selector that succeeded."""
+        element, resolved_selector = StealthUtils._resolve_target(
+            page,
+            selector,
+            context=context,
+            timeout=2000,
+        )
+
+        if not element or not resolved_selector:
             print(f"Warning: Element not found for typing: {selector}")
-            return
+            return None
 
         # Click to focus
-        element.click()
+        try:
+            log_selector_attempt(context, resolved_selector, action="click")
+            element.click(timeout=2000)
+            log_selector_attempt(
+                context,
+                resolved_selector,
+                action="click",
+                success=True,
+                reason="focused",
+            )
+        except Exception as exc:
+            log_selector_attempt(
+                context,
+                resolved_selector,
+                action="click",
+                success=False,
+                reason=_selector_reason(exc),
+            )
+            try:
+                log_selector_attempt(context, resolved_selector, action="focus")
+                element.focus()
+                log_selector_attempt(
+                    context,
+                    resolved_selector,
+                    action="focus",
+                    success=True,
+                    reason="fallback_focus",
+                )
+            except Exception as focus_exc:
+                log_selector_attempt(
+                    context,
+                    resolved_selector,
+                    action="focus",
+                    success=False,
+                    reason=_selector_reason(focus_exc),
+                )
+                print(f"Warning: Element focus failed for typing: {resolved_selector}")
+                return None
+
+        cps_min = max(1.0, (wpm_min * 5) / 60.0)
+        cps_max = max(cps_min, (wpm_max * 5) / 60.0)
 
         # Type
         for char in text:
-            element.type(char, delay=random.uniform(25, 75))
+            delay_ms = random.uniform(1000 / cps_max, 1000 / cps_min)
+            element.type(char, delay=delay_ms)
             if random.random() < 0.05:
                 time.sleep(random.uniform(0.15, 0.4))
 
+        return resolved_selector
+
     @staticmethod
-    def realistic_click(page: Page, selector: str):
-        """Click with realistic movement"""
-        element = page.query_selector(selector)
-        if not element:
-            return
+    def realistic_click(
+        page: Page,
+        selector: SelectorTarget,
+        *,
+        context: str = "realistic_click",
+    ) -> Optional[str]:
+        """Click with realistic movement and return the selector that succeeded."""
+        element, resolved_selector = StealthUtils._resolve_target(
+            page,
+            selector,
+            context=context,
+            timeout=2000,
+        )
+        if not element or not resolved_selector:
+            return None
 
         # Optional: Move mouse to element (simplified)
         box = element.bounding_box()
@@ -117,8 +435,102 @@ class StealthUtils:
             page.mouse.move(x, y, steps=5)
 
         StealthUtils.random_delay(100, 300)
-        element.click()
+        try:
+            log_selector_attempt(context, resolved_selector, action="click")
+            element.click(timeout=2000)
+            log_selector_attempt(
+                context,
+                resolved_selector,
+                action="click",
+                success=True,
+                reason="clicked",
+            )
+        except Exception as exc:
+            log_selector_attempt(
+                context,
+                resolved_selector,
+                action="click",
+                success=False,
+                reason=_selector_reason(exc),
+            )
+            try:
+                log_selector_attempt(context, resolved_selector, action="click_force")
+                element.click(force=True, timeout=2000)
+                log_selector_attempt(
+                    context,
+                    resolved_selector,
+                    action="click_force",
+                    success=True,
+                    reason="force_clicked",
+                )
+            except Exception as force_exc:
+                log_selector_attempt(
+                    context,
+                    resolved_selector,
+                    action="click_force",
+                    success=False,
+                    reason=_selector_reason(force_exc),
+                )
+                return None
         StealthUtils.random_delay(100, 300)
+        return resolved_selector
+
+    @staticmethod
+    def _resolve_target(
+        page: Page,
+        selector: SelectorTarget,
+        *,
+        context: str,
+        timeout: int,
+    ) -> Tuple[Optional[object], Optional[str]]:
+        """Resolve a single selector or selector list to an element and winner."""
+        if isinstance(selector, str):
+            log_selector_attempt(context, selector, action="query_selector")
+            element = page.query_selector(selector)
+            if element:
+                log_selector_attempt(
+                    context,
+                    selector,
+                    action="query_selector",
+                    success=True,
+                    reason="matched",
+                )
+                return element, selector
+
+            try:
+                element = page.wait_for_selector(selector, timeout=timeout, state="visible")
+            except Exception as exc:
+                log_selector_attempt(
+                    context,
+                    selector,
+                    action="wait_for_selector",
+                    success=False,
+                    reason=_selector_reason(exc),
+                    timeout=timeout,
+                    state="visible",
+                )
+                return None, None
+
+            log_selector_attempt(
+                context,
+                selector,
+                action="wait_for_selector",
+                success=bool(element),
+                reason="matched" if element else "missing",
+                timeout=timeout,
+                state="visible",
+            )
+            if element:
+                return element, selector
+            return None, None
+
+        return wait_for_first_selector(
+            page,
+            list(selector),
+            context=context,
+            timeout=timeout,
+            state="visible",
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -189,22 +601,21 @@ def add_source_web(
         # Fill URL into the query box textarea
         url_input_selectors = [
             'textarea[aria-label="Hộp truy vấn"]',
-            'textarea.query-box-input',
+            *QUERY_INPUT_SELECTORS,
         ]
-        filled = False
-        for sel in url_input_selectors:
-            try:
-                if page.is_visible(sel):
-                    page.fill(sel, source_url)
-                    filled = True
-                    print(f"  Filled URL via: {sel}")
-                    break
-            except Exception:
-                continue
+        url_selector, _ = find_first_visible_selector(
+            page,
+            url_input_selectors,
+            context="add_source.url_input",
+        )
 
-        if not filled:
+        if not url_selector:
             print("  Error: URL input textarea not found")
             return False
+
+        page.fill(url_selector, source_url)
+        debug(f"Filled source URL with selector: {url_selector}")
+        print(f"  Filled URL via: {url_selector}")
 
         page.keyboard.press("Enter")
         page.wait_for_timeout(3000)

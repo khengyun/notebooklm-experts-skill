@@ -21,7 +21,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from auth_manager import AuthManager
 from notebook_manager import NotebookLibrary
 from config import QUERY_INPUT_SELECTORS, RESPONSE_SELECTORS
-from browser_utils import BrowserFactory, StealthUtils
+from browser_utils import (
+    BrowserFactory,
+    StealthUtils,
+    get_latest_text_from_selectors,
+    wait_for_first_selector,
+)
 from runtime_logging import (
     configure_runtime,
     debug,
@@ -192,31 +197,32 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         # Wait for the NotebookLM query input to become usable.
         print("  Waiting for query input...")
         expect("At least one configured query textarea selector should become visible")
-        query_element = None
+        query_element, input_selector = wait_for_first_selector(
+            page,
+            QUERY_INPUT_SELECTORS,
+            context="ask.query_input",
+            timeout=10000,
+            state="visible",
+        )
 
-        for selector in QUERY_INPUT_SELECTORS:
-            try:
-                query_element = page.wait_for_selector(
-                    selector,
-                    timeout=10000,
-                    state="visible"  # Only check visibility, not disabled!
-                )
-                if query_element:
-                    print(f"  Found input: {selector}")
-                    break
-            except:
-                continue
-
-        if not query_element:
+        if not query_element or not input_selector:
             print("  Could not find query input")
             return None
 
+        print(f"  Found input: {input_selector}")
+
         # Type question (human-like, fast)
         print("  Typing question...")
-
-        # Use primary selector for typing
-        input_selector = QUERY_INPUT_SELECTORS[0]
-        StealthUtils.human_type(page, input_selector, question)
+        used_selector = StealthUtils.human_type(
+            page,
+            input_selector,
+            question,
+            context="ask.query_type",
+        )
+        if not used_selector:
+            print("  Could not type into query input")
+            return None
+        debug_kv("ask.query_input.selected", selector=used_selector)
 
         # Submit
         print("  Submitting...")
@@ -233,38 +239,51 @@ def ask_notebooklm(question: str, notebook_url: str, headless: bool = True, prof
         stable_count = 0
         last_text = None
         deadline = time.time() + 120  # 2 minutes timeout
+        poll_count = 0
 
         while time.time() < deadline:
+            poll_count += 1
+            debug_kv("ask.response.poll", poll=poll_count, remaining_seconds=max(0, int(deadline - time.time())))
+
             # Check if NotebookLM is still thinking (most reliable indicator)
             try:
                 thinking_element = page.query_selector('div.thinking-message')
                 if thinking_element and thinking_element.is_visible():
+                    debug_kv("ask.response.poll", poll=poll_count, thinking=True)
                     time.sleep(1)
                     continue
             except:
                 pass
 
             # Try the configured response selectors until a stable answer appears.
-            for selector in RESPONSE_SELECTORS:
-                try:
-                    elements = page.query_selector_all(selector)
-                    if elements:
-                        # Get last (newest) response
-                        latest = elements[-1]
-                        text = latest.inner_text().strip()
+            text, response_selector = get_latest_text_from_selectors(
+                page,
+                RESPONSE_SELECTORS,
+                context=f"ask.response.poll.{poll_count}",
+            )
 
-                        if text:
-                            if text == last_text:
-                                stable_count += 1
-                                if stable_count >= 3:  # Stable for 3 polls
-                                    answer = text
-                                    debug(f"Stable answer detected with selector: {selector}")
-                                    break
-                            else:
-                                stable_count = 0
-                                last_text = text
-                except:
-                    continue
+            if text and response_selector:
+                if text == last_text:
+                    stable_count += 1
+                    debug_kv(
+                        "ask.response.stability",
+                        poll=poll_count,
+                        selector=response_selector,
+                        stable_count=stable_count,
+                        text_length=len(text),
+                    )
+                    if stable_count >= 3:  # Stable for 3 polls
+                        answer = text
+                        debug(f"Stable answer detected with selector: {response_selector}")
+                else:
+                    stable_count = 1
+                    last_text = text
+                    debug_kv(
+                        "ask.response.new_text",
+                        poll=poll_count,
+                        selector=response_selector,
+                        text_length=len(text),
+                    )
 
             if answer:
                 break
