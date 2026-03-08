@@ -1,124 +1,281 @@
 ﻿# NotebookLM Experts
 
-Connect GitHub Copilot to Google NotebookLM for explicit, source-grounded queries against notebooks the user has already prepared.
+Source-grounded NotebookLM workflows for GitHub Copilot.
 
-This repository is a **skill package** for agent workflows. It helps the agent query NotebookLM and manage local notebook access, but it does **not** replace the agent's planning, follow-up, or synthesis.
+This repository packages a local skill that lets GitHub Copilot query user-prepared Google NotebookLM notebooks, manage local auth profiles, and work with a per-profile notebook library. It is designed as a connector workflow, not as a standalone application or an autonomous research agent.
 
-## What This Repository Is
+## Overview
 
-- A NotebookLM connector workflow for GitHub Copilot
-- A local skill with query, auth, profile, and notebook-library operations
-- A way to keep answers grounded in NotebookLM sources selected by the user
+NotebookLM Experts gives an agent a controlled way to ask explicit questions against a selected NotebookLM notebook and retrieve answers grounded in the notebook's sources.
 
-## What This Repository Is Not
+The skill handles the operational layer:
 
-- Not a standalone chat application
+- authenticating a local Google account profile
+- storing notebook metadata in a local library
+- opening NotebookLM in an automated browser session
+- submitting one explicit question at a time
+- returning the result so the agent can continue reasoning in chat
+
+The agent still owns the higher-level work:
+
+- deciding when NotebookLM is the right tool
+- choosing the right notebook and question sequence
+- identifying gaps, edge cases, and follow-up questions
+- synthesizing the final answer for the user
+
+## Why This Exists
+
+NotebookLM is useful when source material already lives inside a notebook, but agent workflows still need a reliable local bridge for:
+
+- explicit, repeatable queries
+- reusable authentication state
+- notebook selection across profiles
+- wrapper-based execution inside an isolated Python environment
+
+This repo provides that bridge.
+
+## What It Is
+
+- A GitHub Copilot skill package
+- A local NotebookLM connector workflow
+- A wrapper-first CLI toolkit for auth, notebook management, and querying
+- A source-grounded retrieval layer for agent-led workflows
+
+## What It Is Not
+
+- Not a standalone chat product
 - Not an MCP server for NotebookLM
-- Not an autonomous research system
-- Not a replacement for the agent's reasoning or final response generation
+- Not an autonomous multi-notebook research engine
+- Not a replacement for agent planning, comparison, or synthesis
 
----
+## Workflow
 
-## Quick Install
-
-Paste this into GitHub Copilot chat:
-
-```text
-Install this skill: https://gist.github.com/khengyun/3ad656c8b9eea4f1c141389c962f5297
+```mermaid
+flowchart TD
+	A([User or Agent Need]) --> B[Select Profile]
+	B --> C[Authenticate if Needed]
+	C --> D[Activate or Add Notebook]
+	D --> E[Ask Explicit NotebookLM Question]
+	E --> F[Receive Source-Grounded Answer]
+	F --> G{Enough Information?}
+	G -->|No| E
+	G -->|Yes| H[Agent Synthesizes Final Response]
 ```
-
-The agent will:
-
-- Clone this repository
-- Install it into the correct skills directory
-- Verify the installation
-- Show the next steps
-
-Supported agents:
-
-- GitHub Copilot
-
----
 
 ## Core Capabilities
 
-### Querying
+| Capability | What it does | Primary script |
+|---|---|---|
+| Query notebook | Sends one explicit question to a notebook and returns the answer | `ask_question.py` |
+| Manage authentication | Creates, validates, reauthenticates, and switches profiles | `auth_manager.py` |
+| Manage notebook library | Adds, lists, searches, activates, exports, imports, and removes notebooks | `notebook_manager.py` |
+| Guided profile setup | Walks through interactive profile creation and sign-in | `add_profile.py` |
+| Validate notebook registry | Checks stored notebook links and local library consistency | `check_notebooks.py` |
+| Cleanup and maintenance | Cleans local runtime data and temp artifacts | `cleanup_manager.py` |
+| Skill smoke testing | Exercises core skill layers for debugging | `debug_skill.py` |
 
-- Ask explicit questions against a selected NotebookLM notebook
-- Retrieve answers grounded in NotebookLM sources
-- Run follow-up questions one step at a time under agent control
+## Requirements
 
-### Profiles and Authentication
+- Python `3.9+`
+- Google Chrome
+- GitHub Copilot workflows that can call local skill scripts
+- A Google account with access to NotebookLM
+- At least one NotebookLM notebook already prepared with sources
 
-- Create and switch local auth profiles
-- Reuse saved browser state across runs
-- Validate or refresh authentication when needed
+## Installation
 
-### Local Notebook Library
+Run first-time setup from the repository root:
 
-- Add, list, search, activate, and remove notebooks
-- Keep a local library per profile
-- Use an active notebook as the default query target
+```bash
+python install.py
+```
 
-### Advanced Library Operations
+This setup script will:
 
-- Export and import the local notebook library
-- Add a web or YouTube URL as a NotebookLM source through the library workflow
-- Inspect library statistics and clean local skill data
+- create a local `.venv/`
+- install dependencies from `requirements.txt`
+- install Google Chrome support for `patchright`
 
-### Local Runtime
+## Wrapper-First Usage
 
-- Uses an isolated `.venv/`
-- Uses `patchright` with Google Chrome
-- Supports `run.bat` on Windows and `run.sh` on Linux/macOS
+Normal operations should go through the wrapper scripts so execution always uses the repository's isolated virtual environment.
 
----
-
-## High-Level Flow
-
-1. Install the skill with `python install.py`.
-2. Authenticate a profile with `auth_manager.py setup`.
-3. Add or activate a notebook in the local library.
-4. Ask an explicit question with `ask_question.py --question ...`.
-5. Let the agent decide whether follow-up questions or synthesis are needed.
-
-For the full operating contract, read `SKILL.md`.
-
----
-
-## Example Commands
+### Windows
 
 ```bat
-:: Install once
-python install.py
-
-:: Authenticate
-.\run.bat auth_manager.py setup --name "My Account"
-
-:: Add a notebook
-.\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/..."
-
-:: Ask a question
+.\run.bat auth_manager.py status
+.\run.bat notebook_manager.py list
 .\run.bat ask_question.py --question "What does this notebook say about authentication?"
 ```
 
-Use the wrapper scripts for normal operations so commands run inside the skill's `.venv`.
+### Linux / macOS
 
----
+```bash
+./run.sh auth_manager.py status
+./run.sh notebook_manager.py list
+./run.sh ask_question.py --question "What does this notebook say about authentication?"
+```
+
+## Quick Start
+
+### 1. Check authentication status
+
+```bat
+.\run.bat auth_manager.py status
+```
+
+### 2. Authenticate a profile
+
+```bat
+.\run.bat auth_manager.py setup --name "Work Account"
+```
+
+If you already have a profile:
+
+```bat
+.\run.bat auth_manager.py setup --profile work-account
+```
+
+### 3. Add or activate a notebook
+
+```bat
+.\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/..."
+.\run.bat notebook_manager.py activate --id notebook-id
+```
+
+### 4. Ask an explicit question
+
+```bat
+.\run.bat ask_question.py --question "Summarize the architecture decisions in this notebook"
+```
+
+### 5. Let the agent decide the next step
+
+Typical follow-up flow:
+
+1. Ask a broad question.
+2. Review the returned answer for missing details.
+3. Ask one targeted follow-up question for each gap.
+4. Synthesize the final answer in chat.
+
+## Typical Commands
+
+### Authentication
+
+```bat
+.\run.bat auth_manager.py setup --name "My Account"
+.\run.bat auth_manager.py status
+.\run.bat auth_manager.py validate --profile work-account
+.\run.bat auth_manager.py reauth --profile work-account
+.\run.bat auth_manager.py list
+.\run.bat auth_manager.py set-active --id work-account
+```
+
+### Notebook Library
+
+```bat
+.\run.bat notebook_manager.py list
+.\run.bat notebook_manager.py add --url "https://notebooklm.google.com/notebook/..."
+.\run.bat notebook_manager.py search --query auth
+.\run.bat notebook_manager.py activate --id notebook-id
+.\run.bat notebook_manager.py export --format json
+.\run.bat notebook_manager.py import --file backup.json --strategy merge
+```
+
+### Querying
+
+```bat
+.\run.bat ask_question.py --question "What are the key constraints?"
+.\run.bat ask_question.py --question "Compare the rollout phases" --notebook-id notebook-id
+.\run.bat ask_question.py --question "List cited sources" --notebook-url "https://notebooklm.google.com/notebook/..."
+.\run.bat ask_question.py --question "What changed recently?" --profile work-account
+```
+
+## Recommended Usage Pattern
+
+The most reliable workflow is broad-then-narrow.
+
+1. Select the right notebook.
+2. Ask an overview question.
+3. Inspect the answer for missing areas.
+4. Ask targeted follow-up questions.
+5. Compare across notebooks only when needed.
+6. Keep the final synthesis in the agent, not in the skill.
+
+## Repository Structure
+
+```text
+.
+|-- install.py
+|-- run.bat
+|-- run.sh
+|-- SKILL.md
+|-- requirements.txt
+|-- data/
+|   |-- profiles.json
+|   `-- profiles/
+|-- references/
+|   |-- api-reference.md
+|   |-- best-practices.md
+|   |-- troubleshooting.md
+|   `-- usage_patterns.md
+`-- scripts/
+    |-- add_profile.py
+    |-- ask_question.py
+    |-- auth_manager.py
+    |-- browser_session.py
+    |-- browser_utils.py
+    |-- check_notebooks.py
+    |-- cleanup_manager.py
+    |-- notebook_manager.py
+    |-- run.py
+    `-- runtime_logging.py
+```
+
+## Data and Privacy
+
+Runtime state is stored locally under `data/`.
+
+- `data/profiles.json`: registry of known profiles
+- `data/profiles/<id>/auth_info.json`: profile auth metadata
+- `data/profiles/<id>/library.json`: per-profile notebook library
+- `data/profiles/<id>/browser_state/`: cookies, session state, and browser profile data
+- `data/logs/`: optional debug and runtime logs
+
+This repository is intended to keep operational state local to the machine running the skill.
 
 ## Limitations
 
-- Each query opens a fresh browser session
-- The user must upload source material to NotebookLM separately
-- Free Google accounts may hit query limits
-- Browser automation adds some latency per question
+- Each question opens a fresh browser session.
+- The user must upload and maintain sources in NotebookLM separately.
+- NotebookLM availability and rate limits depend on the user's Google account.
+- Browser automation adds overhead compared with direct API access.
+- Auth sessions may require refresh or reauthentication over time.
 
----
+## Documentation Map
 
-## Read Next
+- `SKILL.md`: skill contract, boundaries, and operating model
+- `references/api-reference.md`: command reference and parameter details
+- `references/best-practices.md`: recommended question and workflow patterns
+- `references/usage_patterns.md`: example operating flows
+- `references/troubleshooting.md`: auth, browser, and rate-limit troubleshooting
 
-- `SKILL.md` - skill contract, boundaries, methods, and operating flow
-- `references/api-reference.md` - CLI and script reference
-- `references/usage_patterns.md` - workflow examples
-- `references/best-practices.md` - question and library guidance
-- `references/troubleshooting.md` - auth, browser, and rate-limit fixes
+## When To Use This Skill
+
+Use it when the user:
+
+- explicitly references NotebookLM
+- provides a NotebookLM notebook URL
+- wants source-grounded answers from notebook content already prepared
+- needs help organizing local notebook profiles or library entries
+
+Avoid it when the task is:
+
+- general web research
+- open-ended autonomous investigation across unrelated sources
+- pure coding or reasoning work without NotebookLM content
+- final synthesis that should remain in the agent response
+
+## License
+
+Released under the MIT License. See `LICENSE` for details.
